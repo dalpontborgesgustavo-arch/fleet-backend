@@ -1,32 +1,46 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
-import { USERS } from './users.seed';
 
 @Injectable()
 export class AuthService {
-  constructor(private jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async login(dto: LoginDto) {
-    const user = USERS.find(
-      (u) => u.email === dto.email && u.password === dto.password,
-    );
+    const { email, password } = dto;
+
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
 
     if (!user) {
-      throw new UnauthorizedException('Credenciais inválidas');
+      throw new UnauthorizedException('Usuário não encontrado');
+    }
+
+    if (user.password !== password) {
+      throw new UnauthorizedException('Senha inválida');
     }
 
     const payload = {
       sub: user.id,
       email: user.email,
       role: user.role,
-      tipoFrota: ('tipoFrota' in user ? (user as any).tipoFrota : null),
+      tipoFrota: user.tipoFrota ?? null,
     };
 
-    const token = this.jwtService.sign(payload);
-
-    const { password, ...safeUser } = user as any;
-
-    return { token, user: safeUser };
+    return {
+      token: this.jwtService.sign(payload),
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        tipoFrota: user.tipoFrota ?? null,
+      },
+    };
   }
 }
