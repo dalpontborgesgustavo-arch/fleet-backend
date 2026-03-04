@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
+import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class AuthService {
@@ -21,14 +22,42 @@ export class AuthService {
       throw new UnauthorizedException('Usuário não encontrado');
     }
 
-    if (user.password !== password) {
-      throw new UnauthorizedException('Senha inválida');
+    // Sempre padroniza role para minúsculo
+    const role = (user.role || '').toLowerCase();
+
+    let valid = false;
+
+    // 1️⃣ Tenta comparar como hash (bcrypt)
+    try {
+      valid = await bcrypt.compare(password, user.password);
+    } catch {
+      valid = false;
+    }
+
+    // 2️⃣ Se não for hash ainda (senha antiga em texto puro),
+    // compara direto e já converte para hash automaticamente
+    if (!valid && user.password === password) {
+      valid = true;
+
+      const hashed = await bcrypt.hash(password, 10);
+
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          password: hashed,
+          role, // já aproveita para padronizar no banco
+        },
+      });
+    }
+
+    if (!valid) {
+      throw new UnauthorizedException('Credenciais inválidas');
     }
 
     const payload = {
       sub: user.id,
       email: user.email,
-      role: user.role,
+      role,
       tipoFrota: user.tipoFrota ?? null,
     };
 
@@ -38,7 +67,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         name: user.name,
-        role: user.role,
+        role,
         tipoFrota: user.tipoFrota ?? null,
       },
     };
