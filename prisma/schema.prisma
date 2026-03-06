@@ -21,13 +21,14 @@ model User {
 model Checklist {
   id        String          @id @default(uuid())
   title     String
+  vehicleId String?
   month     Int
   year      Int
-  status    String          @default("aberto")
+  status    String
   createdBy String
   createdAt DateTime        @default(now())
-  user      User            @relation(fields: [createdBy], references: [id])
   items     ChecklistItem[]
+  user      User            @relation(fields: [createdBy], references: [id])
 }
 
 model ChecklistItem {

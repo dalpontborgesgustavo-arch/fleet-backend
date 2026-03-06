@@ -6,32 +6,38 @@ import { CreateChecklistDto } from './dto/create-checklist.dto';
 export class ChecklistService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(createdBy: string, dto: CreateChecklistDto) {
+  async create(dto: CreateChecklistDto, userId: string) {
     const now = new Date();
 
     return this.prisma.checklist.create({
       data: {
         title: dto.title,
+        vehicleId: dto.vehicleId,
         month: now.getMonth() + 1,
         year: now.getFullYear(),
-        createdBy,
-        items: dto.items?.length
-          ? {
-              create: dto.items.map((i) => ({
-                label: i.label,
-                ok: i.ok,
-              })),
-            }
-          : undefined,
+        status: 'aberto',
+        createdBy: userId,
+        items: {
+          create: dto.items.map((item) => ({
+            label: item.label,
+            ok: item.ok,
+          })),
+        },
       },
-      include: { items: true },
+      include: {
+        items: true,
+      },
     });
   }
 
-  async list() {
+  async findAll() {
     return this.prisma.checklist.findMany({
-      orderBy: { createdAt: 'desc' },
-      include: { items: true },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      include: {
+        items: true,
+      },
     });
   }
 }
