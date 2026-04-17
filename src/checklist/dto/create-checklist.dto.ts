@@ -1,27 +1,26 @@
-import { IsArray, IsBoolean, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 class CreateChecklistItemDto {
   @IsString()
-  label: string;
+  label!: string;
 
   @IsBoolean()
-  ok: boolean;
+  ok!: boolean;
 }
 
 export class CreateChecklistDto {
   @IsString()
-  title: string;
+  title!: string;
 
   @IsString()
-  vehicleId: string;
+  vehicleId!: string;
 
-  @IsOptional()
   @IsString()
   type?: string;
 
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateChecklistItemDto)
-  items: CreateChecklistItemDto[];
+  items!: CreateChecklistItemDto[];
 }
