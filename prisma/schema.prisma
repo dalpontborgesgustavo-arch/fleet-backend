@@ -115,6 +115,9 @@ model Occurrence {
   responsavelUserId String?
   dataEntrada       DateTime?
   dataPrevistaSaida DateTime?
+  entregaLimiteEm   DateTime?
+  entregueEm        DateTime?
+  entreguePorUserId String?
   dataInicioExecucao DateTime?
   dataConclusao     DateTime?
 
@@ -127,6 +130,7 @@ model Occurrence {
   @@index([checklistId])
   @@index([createdBy])
   @@index([status])
+  @@index([entregaLimiteEm])
 }
 
 model OccurrencePhoto {

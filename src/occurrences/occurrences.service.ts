@@ -16,6 +16,9 @@ type OccurrenceSnapshot = {
   responsavelUserId: string | null;
   dataEntrada: Date | null;
   dataPrevistaSaida: Date | null;
+  entregaLimiteEm: Date | null;
+  entregueEm: Date | null;
+  entreguePorUserId: string | null;
   dataInicioExecucao: Date | null;
   dataConclusao: Date | null;
 };
@@ -25,7 +28,17 @@ function hasPlanning(occurrence: OccurrenceSnapshot) {
     occurrence.localExecucao ||
     occurrence.responsavelUserId ||
     occurrence.dataEntrada ||
-    occurrence.dataPrevistaSaida
+    occurrence.dataPrevistaSaida ||
+    occurrence.entregaLimiteEm
+  );
+}
+
+function isAwaitingDriverValidation(occurrence: OccurrenceSnapshot) {
+  return (
+    occurrence.status === 'REJECTED_SUPERVISOR' &&
+    hasPlanning(occurrence) &&
+    !!occurrence.responsavelUserId &&
+    !!occurrence.dataConclusao
   );
 }
 
@@ -118,6 +131,12 @@ export class OccurrencesService {
 
   async program(id: string, dto: ProgramOccurrenceDto) {
     const occurrence = await this.ensureExists(id);
+    const requestedStartExecution =
+      dto.dataInicioExecucao !== undefined && toDate(dto.dataInicioExecucao);
+
+    if (isAwaitingDriverValidation(occurrence) && requestedStartExecution) {
+      throw new BadRequestException('Ocorrência aguarda validação do motorista');
+    }
 
     const next: OccurrenceSnapshot = {
       status: occurrence.status,
@@ -127,6 +146,11 @@ export class OccurrencesService {
       dataEntrada: dto.dataEntrada === undefined ? occurrence.dataEntrada : toDate(dto.dataEntrada),
       dataPrevistaSaida:
         dto.dataPrevistaSaida === undefined ? occurrence.dataPrevistaSaida : toDate(dto.dataPrevistaSaida),
+      entregaLimiteEm:
+        dto.entregaLimiteEm === undefined ? occurrence.entregaLimiteEm : toDate(dto.entregaLimiteEm),
+      entregueEm: dto.entregueEm === undefined ? occurrence.entregueEm : toDate(dto.entregueEm),
+      entreguePorUserId:
+        dto.entreguePorUserId === undefined ? occurrence.entreguePorUserId : dto.entreguePorUserId,
       dataInicioExecucao:
         dto.dataInicioExecucao === undefined ? occurrence.dataInicioExecucao : toDate(dto.dataInicioExecucao),
       dataConclusao:
@@ -142,6 +166,9 @@ export class OccurrencesService {
         responsavelUserId: next.responsavelUserId,
         dataEntrada: next.dataEntrada,
         dataPrevistaSaida: next.dataPrevistaSaida,
+        entregaLimiteEm: next.entregaLimiteEm,
+        entregueEm: next.entregueEm,
+        entreguePorUserId: next.entreguePorUserId,
         dataInicioExecucao: next.dataInicioExecucao,
         dataConclusao: next.dataConclusao,
         status: nextStatus,
