@@ -15,20 +15,23 @@ model User {
   role       String
   tipoFrota  String?
   createdAt  DateTime    @default(now())
+  occurrences Occurrence[]
   checklists Checklist[]
 }
 
 model Checklist {
-  id        String          @id @default(uuid())
-  title     String
-  vehicleId String?
-  month     Int
-  year      Int
-  status    String
-  createdBy String
-  createdAt DateTime        @default(now())
-  items     ChecklistItem[]
-  user      User            @relation(fields: [createdBy], references: [id])
+  id          String           @id @default(uuid())
+  title       String
+  vehicleId   String?
+  month       Int
+  year        Int
+  status      String
+  type        ChecklistType    @default(DAILY)
+  createdBy   String
+  createdAt   DateTime         @default(now())
+  items       ChecklistItem[]
+  user        User             @relation(fields: [createdBy], references: [id])
+  occurrences Occurrence[]
 }
 
 model ChecklistItem {
@@ -40,4 +43,99 @@ model ChecklistItem {
   checklist   Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
 
   @@index([checklistId])
+}
+model ChecklistTemplate {
+  id          String              @id @default(uuid())
+  name        String
+  vehicleType String
+  createdAt   DateTime            @default(now())
+  questions   ChecklistQuestion[]
+}
+
+model ChecklistQuestion {
+  id         String            @id @default(uuid())
+  templateId String
+  question   String
+  critical   Boolean           @default(false)
+  createdAt  DateTime          @default(now())
+  template   ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+}
+model Vehicle {
+  id          String       @id @default(uuid())
+  name        String?
+  plate       String
+  model       String?
+  fleet       String?
+  type        String
+  vehicleType String
+  tipoFrota   String
+  active      Boolean      @default(true)
+  photoUrl    String?
+  createdAt   DateTime     @default(now())
+  occurrences Occurrence[]
+}
+
+enum OccurrenceStatus {
+  OPEN
+  PENDING_SUPERVISOR
+  APPROVED_SUPERVISOR
+  REJECTED_SUPERVISOR
+  IN_PROGRESS
+  RESOLVED
+  CANCELLED
+}
+
+enum OccurrenceSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ChecklistType {
+  DAILY
+  MONTHLY
+}
+
+model Occurrence {
+  id                String             @id @default(uuid())
+  vehicleId         String
+  checklistId       String?
+  questionId        String?
+  questionLabel     String
+  description       String
+  status            OccurrenceStatus   @default(PENDING_SUPERVISOR)
+  severity          OccurrenceSeverity @default(MEDIUM)
+  createdBy         String
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  localExecucao     String?
+  responsavelUserId String?
+  dataEntrada       DateTime?
+  dataPrevistaSaida DateTime?
+  dataInicioExecucao DateTime?
+  dataConclusao     DateTime?
+
+  vehicle           Vehicle            @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  checklist         Checklist?         @relation(fields: [checklistId], references: [id], onDelete: SetNull)
+  user              User               @relation(fields: [createdBy], references: [id])
+  photos            OccurrencePhoto[]
+
+  @@index([vehicleId])
+  @@index([checklistId])
+  @@index([createdBy])
+  @@index([status])
+}
+
+model OccurrencePhoto {
+  id           String      @id @default(uuid())
+  occurrenceId String
+  url          String
+  createdAt    DateTime    @default(now())
+
+  occurrence   Occurrence  @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+
+  @@index([occurrenceId])
 }

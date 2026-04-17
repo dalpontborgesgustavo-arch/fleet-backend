@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 class CreateChecklistItemDto {
@@ -15,6 +15,10 @@ export class CreateChecklistDto {
 
   @IsString()
   vehicleId: string;
+
+  @IsOptional()
+  @IsString()
+  type?: string;
 
   @IsArray()
   @ValidateNested({ each: true })

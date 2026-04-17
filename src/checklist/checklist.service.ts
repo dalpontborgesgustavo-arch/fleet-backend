@@ -16,6 +16,7 @@ export class ChecklistService {
         month: now.getMonth() + 1,
         year: now.getFullYear(),
         status: 'aberto',
+        type: dto.type === 'MONTHLY' ? 'MONTHLY' : 'DAILY',
         createdBy: userId,
         items: {
           create: dto.items.map((item) => ({
