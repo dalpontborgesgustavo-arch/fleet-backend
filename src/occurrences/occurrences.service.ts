@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { OccurrenceSeverity } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOccurrenceDto } from './dto/create-occurrence.dto';
 import { ProgramOccurrenceDto } from './dto/program-occurrence.dto';
@@ -32,6 +33,16 @@ function toDate(value?: string | null) {
   return value ? new Date(value) : null;
 }
 
+function toSeverity(value?: string | null) {
+  if (!value) {
+    return undefined;
+  }
+
+  return Object.values(OccurrenceSeverity).includes(value as OccurrenceSeverity)
+    ? (value as OccurrenceSeverity)
+    : undefined;
+}
+
 @Injectable()
 export class OccurrencesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -46,17 +57,31 @@ export class OccurrencesService {
   }
 
   create(dto: CreateOccurrenceDto, userId?: string) {
+    if (!dto.vehicleId) {
+      throw new BadRequestException('vehicleId é obrigatório');
+    }
+
+    if (!userId) {
+      throw new BadRequestException('Usuário autenticado não encontrado');
+    }
+
     return this.prisma.occurrence.create({
       data: {
-        vehicleId: dto.vehicleId ?? null,
-        checklistId: dto.checklistId ?? null,
-        questionId: dto.questionId ?? null,
-        questionLabel: dto.questionLabel ?? null,
-        description: dto.description ?? null,
+        vehicleId: dto.vehicleId,
+        checklistId: dto.checklistId ?? undefined,
+        questionId: dto.questionId ?? undefined,
+        questionLabel: dto.questionLabel ?? '',
+        description: dto.description ?? '',
         status: 'PENDING_SUPERVISOR',
-        severity: dto.severity ?? null,
-        createdBy: userId ?? null,
-        photos: dto.photos ?? [],
+        severity: toSeverity(dto.severity),
+        createdBy: userId,
+        photos: dto.photos?.length
+          ? {
+              create: dto.photos.map((url) => ({
+                url,
+              })),
+            }
+          : undefined,
       },
       include: includeOccurrenceRelations,
     });
