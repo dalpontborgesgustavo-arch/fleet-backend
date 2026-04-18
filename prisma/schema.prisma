@@ -93,6 +93,13 @@ enum OccurrenceSeverity {
   HIGH
 }
 
+enum PartRequestStatus {
+  PENDING_MAINTENANCE_APPROVAL
+  REJECTED_MAINTENANCE
+  APPROVED_FOR_PURCHASING
+  PURCHASED
+}
+
 enum ChecklistType {
   DAILY
   MONTHLY
@@ -125,6 +132,7 @@ model Occurrence {
   checklist         Checklist?         @relation(fields: [checklistId], references: [id], onDelete: SetNull)
   user              User               @relation(fields: [createdBy], references: [id])
   photos            OccurrencePhoto[]
+  partRequests      PartRequest[]
 
   @@index([vehicleId])
   @@index([checklistId])
@@ -142,4 +150,31 @@ model OccurrencePhoto {
   occurrence   Occurrence  @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
 
   @@index([occurrenceId])
+}
+
+model PartRequest {
+  id                 String            @id @default(uuid())
+  occurrenceId       String
+  description        String
+  quantity           Int               @default(1)
+  notes              String?
+  status             PartRequestStatus @default(PENDING_MAINTENANCE_APPROVAL)
+  requestedByUserId  String
+  requestedAt        DateTime          @default(now())
+  approvedByUserId   String?
+  approvedAt         DateTime?
+  rejectedByUserId   String?
+  rejectedAt         DateTime?
+  rejectionReason    String?
+  purchaseOrder      String?
+  expectedDeliveryAt DateTime?
+  purchasingNotes    String?
+  purchasedByUserId  String?
+  purchasedAt        DateTime?
+
+  occurrence         Occurrence        @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+
+  @@index([occurrenceId])
+  @@index([status])
+  @@index([requestedByUserId])
 }

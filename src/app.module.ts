@@ -10,6 +10,7 @@ import { ChecklistModule } from './checklist/checklist.module';
 import { ChecklistTemplateModule } from './checklist-template/checklist-template.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { OccurrencesModule } from './occurrences/occurrences.module';
+import { PartRequestsModule } from './part-requests/part-requests.module';
 import { UploadController } from './upload.controller';
 
 @Module({
@@ -22,6 +23,7 @@ import { UploadController } from './upload.controller';
     ChecklistModule,
     UsersModule,
     OccurrencesModule,
+    PartRequestsModule,
   ],
   controllers: [
     AppController,

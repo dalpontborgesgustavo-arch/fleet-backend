@@ -11,7 +11,7 @@ function getManageableRoles(role?: string | null): string[] {
   const normalizedRole = normalizeRole(role);
 
   if (normalizedRole === 'admin') {
-    return ['motorista', 'manutencao', 'manutentor', 'supervisor', 'gestor', 'admin'];
+    return ['motorista', 'manutencao', 'manutentor', 'supervisor', 'gestor', 'compras', 'admin'];
   }
 
   if (normalizedRole === 'manutencao') {
