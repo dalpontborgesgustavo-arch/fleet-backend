@@ -1,0 +1,2 @@
+# Prisma stores a checksum of each migration's exact bytes. Do not rewrite line endings.
+prisma/migrations/**/migration.sql -text
