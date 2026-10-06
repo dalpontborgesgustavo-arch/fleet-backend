@@ -20,6 +20,11 @@ describe('VehiclesService', () => {
     expect(findMany).toHaveBeenCalledWith({
       where: { tipoFrota: 'Veiculos', filial: 'NORTE' },
       orderBy: { createdAt: 'desc' },
+      include: {
+        monthlyChecklistResponsible: {
+          select: { id: true, name: true, email: true, active: true },
+        },
+      },
     });
   });
 

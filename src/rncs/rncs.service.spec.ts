@@ -56,7 +56,7 @@ describe('RncsService issuer changes before manager action', () => {
         'issuer-1',
       ),
     ).toThrow(
-      'A RNC so pode ser editada ou cancelada antes da primeira acao do gestor',
+      'A RNC so pode ser editada antes da primeira acao do gestor',
     );
   });
 
@@ -67,7 +67,7 @@ describe('RncsService issuer changes before manager action', () => {
         'issuer-1',
       ),
     ).toThrow(
-      'A RNC so pode ser editada ou cancelada antes da primeira acao do gestor',
+      'A RNC so pode ser editada antes da primeira acao do gestor',
     );
   });
 });
@@ -134,7 +134,7 @@ describe('RncsService RNC oversight profiles', () => {
 
 describe('RncsService responsibility-only profile', () => {
   it.each(['financeiro', 'contabilidade', 'ssma', 'ti', 'vendas', 'rh'])(
-    'lists only RNCs assigned as responsibility to the authenticated %s user',
+    'lists RNCs tied to the authenticated %s user by internal authorship or responsibility',
     async (role) => {
       const findMany = jest.fn().mockResolvedValue([]);
       const service = new RncsService(
@@ -150,7 +150,13 @@ describe('RncsService responsibility-only profile', () => {
         expect.objectContaining({
           where: {
             OR: [
+              { engineerId: 'responsible-user-1', type: 'INTERNAL' },
               { responsibleUserId: 'responsible-user-1' },
+              {
+                correctiveActions: {
+                  some: { responsibleUserId: 'responsible-user-1' },
+                },
+              },
               {
                 assignments: {
                   some: { assignedToId: 'responsible-user-1' },
@@ -419,6 +425,7 @@ describe('RncsService corrective action execution evidence', () => {
         rncId: 'rnc-internal-1',
         description: 'Executar treinamento da equipe',
         responsible: 'Responsavel teste',
+        responsibleUserId: 'responsible-1',
         dueDate: new Date('2026-08-20T12:00:00.000Z'),
         situation: 'Em andamento',
         executionNotes: null,
@@ -534,6 +541,14 @@ describe('RncsService corrective action execution evidence', () => {
     };
     const service = new RncsService(
       {
+        user: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 'responsible-1',
+            name: 'Novo responsavel',
+            email: 'responsavel@jr.com',
+            role: 'administrativo',
+          }),
+        },
         rncCorrectiveAction: { update },
         rncHistory: { create: createHistory },
         $transaction: transaction,
@@ -552,7 +567,7 @@ describe('RncsService corrective action execution evidence', () => {
       'action-1',
       {
         description: ' Treinar a equipe e registrar a ata ',
-        responsible: ' Novo responsavel ',
+        responsibleUserId: 'responsible-1',
         dueDate: '2026-08-25',
         situation: 'Em andamento',
       },
@@ -565,6 +580,7 @@ describe('RncsService corrective action execution evidence', () => {
       data: {
         description: 'Treinar a equipe e registrar a ata',
         responsible: 'Novo responsavel',
+        responsibleUserId: 'responsible-1',
         dueDate: expect.any(Date),
         situation: 'Em andamento',
       },

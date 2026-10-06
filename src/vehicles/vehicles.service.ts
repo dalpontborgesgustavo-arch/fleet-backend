@@ -23,6 +23,13 @@ function normalizePlateKey(value: unknown): string {
     .replace(/[^A-Z0-9]/g, '');
 }
 
+function normalizeFleetKey(value: unknown): string {
+  return cleanText(value)
+    .replace(/^FROTA[\s-]*/i, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+}
+
 type FleetReportOccurrence = {
   status: string;
   localExecucao: string | null;
@@ -394,7 +401,7 @@ export class VehiclesService {
     const normalizedData = this.normalizeVehicleData(data, true);
     this.validateRollerClassification(normalizedData.subgroup, normalizedData.rollerType);
     this.ensureRequiredIdentity(normalizedData);
-    await this.ensureUniquePlate(normalizedData);
+    await this.ensureUniqueIdentity(normalizedData);
     await this.ensureMonthlyChecklistResponsible(normalizedData);
 
     try {
@@ -449,7 +456,7 @@ export class VehiclesService {
           : normalizedData.fleet,
     };
     this.ensureRequiredIdentity(identity);
-    await this.ensureUniquePlate(identity, id);
+    await this.ensureUniqueIdentity(identity, id, existing.aethosManaged);
     await this.ensureMonthlyChecklistResponsible(normalizedData);
 
     try {
@@ -719,24 +726,43 @@ export class VehiclesService {
     }
   }
 
-  private async ensureUniquePlate(
-    data: { plate?: unknown },
+  private async ensureUniqueIdentity(
+    data: { plate?: unknown; fleet?: unknown },
     excludeId?: string,
+    allowDuplicateFleet = false,
   ) {
     const plateKey = normalizePlateKey(data.plate);
+    const fleetKey = normalizeFleetKey(data.fleet);
     const existingVehicles = await this.prisma.vehicle.findMany({
       where: excludeId ? { id: { not: excludeId } } : undefined,
       select: {
         plate: true,
+        fleet: true,
       },
     });
 
     const plateConflict = existingVehicles.find(
       (vehicle) => normalizePlateKey(vehicle.plate) === plateKey,
     );
+    const fleetConflict =
+      !allowDuplicateFleet && fleetKey
+        ? existingVehicles.find(
+            (vehicle) => normalizeFleetKey(vehicle.fleet) === fleetKey,
+          )
+        : null;
+    if (plateConflict && fleetConflict === plateConflict) {
+      throw new ConflictException(
+        `Já existe um veículo cadastrado com a frota ${cleanText(data.fleet)} e a placa ${cleanText(data.plate).toUpperCase()}.`,
+      );
+    }
     if (plateConflict) {
       throw new ConflictException(
         `A placa ${cleanText(data.plate).toUpperCase()} já está cadastrada em outro veículo.`,
+      );
+    }
+    if (fleetConflict) {
+      throw new ConflictException(
+        `A frota ${cleanText(data.fleet)} já está cadastrada em outro veículo.`,
       );
     }
   }
