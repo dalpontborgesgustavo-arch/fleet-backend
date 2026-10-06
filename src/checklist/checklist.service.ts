@@ -1072,10 +1072,7 @@ function getFrontFleetPhotoUrl(photos: Prisma.InputJsonArray | undefined) {
     : null;
 }
 
-const ASSIGNMENT_NOTIFICATION_RECIPIENTS = [
-  'daniela.silva@jrmc.com.br',
-  'dalpontborgesgustavo@gmail.com',
-];
+const ASSIGNMENT_NOTIFICATION_RECIPIENTS = ['daniela.silva@jrmc.com.br'];
 
 type MonthlyAssignmentVehicle = {
   fleet: string | null;
