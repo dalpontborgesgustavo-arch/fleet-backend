@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   NoSuchKey,
   PutObjectCommand,
   S3Client,
@@ -111,6 +112,26 @@ export class S3UploadService {
         throw new NotFoundException('Arquivo nao encontrado');
       }
 
+      throw error;
+    }
+  }
+
+  async imageExists(key: string) {
+    const bucket = this.getBucketName();
+    if (!bucket) {
+      this.assertLocalStorageAllowed();
+      try {
+        return (await stat(join(this.getLocalUploadDir(), basename(key)))).size > 0;
+      } catch {
+        return false;
+      }
+    }
+    try {
+      const result = await this.getClient().send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+      return (result.ContentLength ?? 0) > 0 && result.ContentType?.startsWith('image/') === true;
+    } catch (error) {
+      const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+      if (status === 404) return false;
       throw error;
     }
   }

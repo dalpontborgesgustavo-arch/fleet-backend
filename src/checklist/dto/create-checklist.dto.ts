@@ -2,8 +2,11 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsInt,
   IsOptional,
   IsString,
+  Max,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -53,6 +56,54 @@ export class CreateChecklistDto {
 
   @IsString()
   type?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['OWN', 'ASSISTANCE'])
+  executionMode?: 'OWN' | 'ASSISTANCE';
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  periodMonth?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(2020)
+  periodYear?: number;
+
+  @IsOptional()
+  @IsString()
+  capturedAt?: string;
+
+  @IsOptional()
+  @IsString()
+  driverName?: string;
+
+  @IsOptional()
+  @IsString()
+  driverEmployeeKey?: string;
+
+  @IsOptional()
+  @IsString()
+  responsibleName?: string;
+
+  @IsOptional()
+  @IsString()
+  responsibleEmployeeKey?: string;
+
+  @IsOptional()
+  @IsArray()
+  laborAssignments?: Array<{ role: string; employeeKey: string }>;
+
+  @IsOptional()
+  @IsBoolean()
+  vehicleStopped?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  inMaintenance?: boolean;
 
   @IsArray()
   @ValidateNested({ each: true })

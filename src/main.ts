@@ -21,7 +21,17 @@ async function bootstrap() {
     credentials: true,
   });
 
-  app.use('/uploads', express.static(join(process.cwd(), 'uploads')));
+  app.use(
+    '/uploads',
+    (request, response, next) => {
+      if (request.path.replace(/^\/+/, '').startsWith('legal-case-')) {
+        response.sendStatus(404);
+        return;
+      }
+      next();
+    },
+    express.static(join(process.cwd(), 'uploads')),
+  );
 
   await app.listen(3000);
 }

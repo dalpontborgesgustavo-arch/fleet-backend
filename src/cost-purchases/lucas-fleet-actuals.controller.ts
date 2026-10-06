@@ -11,6 +11,7 @@ import { JwtGuard } from '../auth/jwt.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { CostPurchasesService } from './cost-purchases.service';
 import { LucasFleetRevenueSyncService } from '../aethos-integration/lucas-fleet-revenue-sync.service';
+import { getLucasFleetGroupLaborActuals } from './lucas-fleet-labor-actuals';
 
 const READ_ROLES = new Set([
   'admin',
@@ -56,6 +57,7 @@ export class LucasFleetActualsController {
       dieselFacts,
       mappedVehicles,
       revenue,
+      labor,
     ] = await Promise.all([
       this.prisma.costPurchaseVehicleExpenseFact.groupBy({
         by: ['aethosVehicleId'],
@@ -91,6 +93,7 @@ export class LucasFleetActualsController {
         select: { id: true, aethosVehicleId: true },
       }),
       this.revenues.monthActuals(month),
+      getLucasFleetGroupLaborActuals(this.prisma, competence!),
     ]);
     const limitations = [
       'Custos e abastecimentos seguem a elegibilidade do relatorio mensal; o faturamento usa o vinculo do veiculo local com o Aethos.',
@@ -101,7 +104,7 @@ export class LucasFleetActualsController {
       revenue.coverage
         ? 'Faturamento realizado usa a fonte Receita Total do Power BI Frota, publicada por snapshot finalizado e reconciliado.'
         : 'Faturamento realizado fica null enquanto nao houver snapshot finalizado e reconciliado cobrindo a competencia.',
-      'Mao de obra realizada ainda nao faz parte desta resposta.',
+      'Mao de obra realizada usa os colaboradores TOTVS vinculados no checklist mensal; grupos sem vinculo completo ou custo conhecido permanecem null.',
     ];
     const mappedAethosIds = new Set(
       mappedVehicles.map((vehicle) => String(vehicle.aethosVehicleId)),
@@ -118,8 +121,9 @@ export class LucasFleetActualsController {
       return {
         competence,
         rows: [],
+        groupLaborActuals: labor.groupLaborActuals,
         source: 'COST_PURCHASES_AND_FLEET_REVENUE_PBI',
-        coverage: { revenue: revenue.coverage },
+        coverage: { revenue: revenue.coverage, labor: labor.coverage },
         limitations,
       };
     }
@@ -188,8 +192,9 @@ export class LucasFleetActualsController {
     return {
       competence,
       rows,
+      groupLaborActuals: labor.groupLaborActuals,
       source: 'COST_PURCHASES_AND_FLEET_REVENUE_PBI',
-      coverage: { revenue: revenue.coverage },
+      coverage: { revenue: revenue.coverage, labor: labor.coverage },
       limitations,
     };
   }

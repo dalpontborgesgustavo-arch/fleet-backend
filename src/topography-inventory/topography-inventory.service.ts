@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
@@ -7,6 +8,14 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 const ALLOWED_COMPANIES = new Set(['USINA_JR', 'PEDRAFORTE']);
+
+const CAP_LITER_DENSITY_BY_AETHOS_CODE: Record<string, string> = {
+  '1813': '1.000',
+  '5525': '1.010',
+  '5643': '1.005',
+  '11734': '1.005',
+  '13861': '1.028',
+};
 
 type InventoryPayload = {
   company?: unknown;
@@ -19,6 +28,12 @@ type InventoryPayload = {
 type InventoryItemPayload = {
   materialId?: unknown;
   volumeM3?: unknown;
+  inputLiters?: unknown;
+};
+
+type AddMaterialPayload = {
+  company?: unknown;
+  aethosItemId?: unknown;
 };
 
 function text(value: unknown) {
@@ -63,7 +78,8 @@ function parseReference(yearValue: unknown, monthValue: unknown) {
 
 function parseMeasuredAt(value: unknown) {
   const raw = text(value);
-  if (!raw) throw new BadRequestException('Data e hora da medição são obrigatórias');
+  if (!raw)
+    throw new BadRequestException('Data e hora da medição são obrigatórias');
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) {
     throw new BadRequestException('Data e hora da medição inválidas');
@@ -80,7 +96,8 @@ export function parseInventoryVolume(value: unknown) {
   }
 
   const raw = text(value).replace(/\s/g, '');
-  if (!raw) throw new BadRequestException('Preencha o volume de todos os materiais');
+  if (!raw)
+    throw new BadRequestException('Preencha o volume de todos os materiais');
   const normalized = raw.includes(',')
     ? raw.replace(/\./g, '').replace(',', '.')
     : raw;
@@ -92,16 +109,40 @@ export function parseInventoryVolume(value: unknown) {
 }
 
 export function calculateInventoryTonnage(
-  volume: Prisma.Decimal,
+  inputValue: Prisma.Decimal,
   density?: Prisma.Decimal | null,
+  inputUnit = 'M3',
 ) {
+  if (inputUnit === 'TON') {
+    return inputValue.toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP);
+  }
+  if (inputUnit === 'LITER') {
+    return density
+      ? inputValue
+          .mul(density)
+          .div(1000)
+          .toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP)
+      : null;
+  }
   return density
-    ? volume.mul(density).toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP)
+    ? inputValue.mul(density).toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP)
     : null;
+}
+
+export function capLiterDensityForAethosCode(value?: unknown) {
+  const density = CAP_LITER_DENSITY_BY_AETHOS_CODE[text(value)];
+  return density ? new Prisma.Decimal(density) : null;
 }
 
 function decimal(value?: Prisma.Decimal | null) {
   return value === null || value === undefined ? null : Number(value);
+}
+
+export function mapAethosInventoryInputUnit(value?: unknown) {
+  const unit = text(value).toUpperCase();
+  if (unit === 'TN' || unit === 'TON' || unit === 'T') return 'TON';
+  if (unit === 'M3' || unit === 'M³') return 'M3';
+  return null;
 }
 
 const inventoryInclude = {
@@ -188,10 +229,136 @@ export class TopographyInventoryService {
       history: history.reverse().map((entry) => this.inventorySummary(entry)),
       dataQuality: {
         materialsWithoutDensity: materials
-          .filter((material) => material.density === null)
+          .filter(
+            (material) =>
+              material.inputUnit === 'M3' && material.density === null,
+          )
           .map((material) => ({ id: material.id, name: material.name })),
       },
     };
+  }
+
+  async searchActiveAethosItems(
+    query: any,
+    actorRole?: string | null,
+    canAccessTopographyInventory?: boolean,
+  ) {
+    this.ensureAccess(actorRole, canAccessTopographyInventory);
+    const company = parseCompany(query?.company);
+    const search = text(query?.search);
+    if (search.length < 2) return [];
+
+    const [items, existingMaterials] = await Promise.all([
+      this.prisma.aethosItem.findMany({
+        where: {
+          active: true,
+          unit: { in: ['M3', 'M³', 'TN', 'TON', 'T'] },
+          OR: [
+            { code: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+          ],
+        },
+        orderBy: [{ description: 'asc' }, { code: 'asc' }],
+        take: 30,
+        select: {
+          id: true,
+          code: true,
+          description: true,
+          unit: true,
+          active: true,
+        },
+      }),
+      this.prisma.topographyInventoryMaterial.findMany({
+        where: { company, aethosItemCode: { not: null } },
+        select: { aethosItemCode: true },
+      }),
+    ]);
+    const existingCodes = new Set(
+      existingMaterials.map((material) => material.aethosItemCode),
+    );
+
+    return items.map((item) => ({
+      ...item,
+      inputUnit: mapAethosInventoryInputUnit(item.unit),
+      alreadyAdded: existingCodes.has(item.code),
+    }));
+  }
+
+  async addAethosMaterial(
+    payload: AddMaterialPayload,
+    actorRole?: string | null,
+    canAccessTopographyInventory?: boolean,
+  ) {
+    this.ensureAccess(actorRole, canAccessTopographyInventory);
+    const company = parseCompany(payload?.company);
+    const aethosItemId = text(payload?.aethosItemId);
+    if (!aethosItemId) {
+      throw new BadRequestException('Selecione um item do Aethos');
+    }
+
+    const aethosItem = await this.prisma.aethosItem.findUnique({
+      where: { id: aethosItemId },
+      select: {
+        id: true,
+        code: true,
+        description: true,
+        unit: true,
+        active: true,
+      },
+    });
+    if (!aethosItem || !aethosItem.active) {
+      throw new BadRequestException(
+        'O item selecionado não está ativo no Aethos',
+      );
+    }
+
+    const aethosInputUnit = mapAethosInventoryInputUnit(aethosItem.unit);
+    const capDensity = capLiterDensityForAethosCode(aethosItem.code);
+    const inputUnit = aethosInputUnit;
+    if (!inputUnit) {
+      throw new BadRequestException(
+        `A unidade ${aethosItem.unit || 'não informada'} não é compatível com o inventário em m³ ou toneladas`,
+      );
+    }
+
+    const existing = await this.prisma.topographyInventoryMaterial.findFirst({
+      where: { company, aethosItemCode: aethosItem.code },
+    });
+    if (existing) {
+      throw new ConflictException(
+        'Este item do Aethos já foi adicionado à empresa',
+      );
+    }
+
+    const lastMaterial =
+      await this.prisma.topographyInventoryMaterial.findFirst({
+        where: { company },
+        orderBy: { sortOrder: 'desc' },
+        select: { sortOrder: true },
+      });
+    const duplicateName =
+      await this.prisma.topographyInventoryMaterial.findUnique({
+        where: {
+          company_name: { company, name: aethosItem.description.trim() },
+        },
+        select: { id: true },
+      });
+    const name = duplicateName
+      ? `${aethosItem.description.trim()} (${aethosItem.code})`
+      : aethosItem.description.trim();
+
+    return this.prisma.topographyInventoryMaterial.create({
+      data: {
+        company,
+        name,
+        aethosItemCode: aethosItem.code,
+        aethosDescription: aethosItem.description,
+        density: capDensity,
+        inputUnit,
+        active: true,
+        sortOrder: (lastMaterial?.sortOrder ?? 0) + 10,
+      },
+    });
   }
 
   async save(
@@ -219,18 +386,56 @@ export class TopographyInventoryService {
       where: { company, active: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
-    const materialById = new Map(materials.map((material) => [material.id, material]));
-    const received = new Map<string, Prisma.Decimal>();
+    const materialById = new Map(
+      materials.map((material) => [material.id, material]),
+    );
+    const received = new Map<
+      string,
+      {
+        inputValue: Prisma.Decimal;
+        densitySnapshot: Prisma.Decimal | null;
+        tonnage: Prisma.Decimal | null;
+      }
+    >();
 
     for (const rawItem of payload.items as InventoryItemPayload[]) {
       const materialId = text(rawItem?.materialId);
       if (!materialById.has(materialId)) {
-        throw new BadRequestException('Material inválido para a empresa selecionada');
+        throw new BadRequestException(
+          'Material inválido para a empresa selecionada',
+        );
       }
       if (received.has(materialId)) {
         throw new BadRequestException('Material repetido no inventário');
       }
-      received.set(materialId, parseInventoryVolume(rawItem?.volumeM3));
+      const material = materialById.get(materialId)!;
+      const capDensity = capLiterDensityForAethosCode(material.aethosItemCode);
+      const hasLiterInput = text(rawItem?.inputLiters) !== '';
+      if (hasLiterInput && !capDensity) {
+        throw new BadRequestException(
+          'Litros são permitidos somente para as famílias de CAP configuradas',
+        );
+      }
+      if (hasLiterInput) {
+        const liters = parseInventoryVolume(rawItem?.inputLiters);
+        const tonnage = calculateInventoryTonnage(liters, capDensity, 'LITER')!;
+        received.set(materialId, {
+          inputValue: tonnage,
+          densitySnapshot: capDensity,
+          tonnage,
+        });
+      } else {
+        const inputValue = parseInventoryVolume(rawItem?.volumeM3);
+        received.set(materialId, {
+          inputValue,
+          densitySnapshot: material.density,
+          tonnage: calculateInventoryTonnage(
+            inputValue,
+            material.density,
+            material.inputUnit,
+          ),
+        });
+      }
     }
 
     if (received.size !== materials.length) {
@@ -238,12 +443,12 @@ export class TopographyInventoryService {
     }
 
     const calculatedItems = materials.map((material) => {
-      const volumeM3 = received.get(material.id)!;
+      const receivedItem = received.get(material.id)!;
       return {
         materialId: material.id,
-        volumeM3,
-        densitySnapshot: material.density,
-        tonnage: calculateInventoryTonnage(volumeM3, material.density),
+        volumeM3: receivedItem.inputValue,
+        densitySnapshot: receivedItem.densitySnapshot,
+        tonnage: receivedItem.tonnage,
       };
     });
 
@@ -270,7 +475,9 @@ export class TopographyInventoryService {
         update: {
           measuredAt,
           updatedById: actorId,
-          source: previous?.source === 'LEGACY_SPREADSHEET' ? 'SYSTEM' : previous?.source,
+          source: previous?.source?.startsWith('LEGACY_SPREADSHEET')
+            ? 'SYSTEM'
+            : previous?.source,
         },
         create: {
           company,
@@ -347,7 +554,8 @@ export class TopographyInventoryService {
       },
     }));
     const totalVolumeM3 = items.reduce(
-      (sum: number, item: any) => sum + (item.volumeM3 ?? 0),
+      (sum: number, item: any) =>
+        sum + (item.material?.inputUnit === 'M3' ? (item.volumeM3 ?? 0) : 0),
       0,
     );
     const totalTonnage = items.reduce(

@@ -26,20 +26,41 @@ export class ChecklistController {
   @UseGuards(JwtGuard)
   @Post()
   create(@Req() req: any, @Body() dto: CreateChecklistDto) {
-    const userId = req.user.sub;
-    return this.checklistService.create(dto, userId);
+    return this.checklistService.create(dto, req.user);
+  }
+
+  @Get('monthly-vehicles')
+  @UseGuards(JwtGuard)
+  findMonthlyVehicles(@Req() req: any, @Query('mode') mode?: string) {
+    return this.checklistService.findMonthlyVehicles(req.user, mode);
+  }
+
+  @Get('monthly-workforce')
+  @UseGuards(JwtGuard)
+  findMonthlyWorkforce(
+    @Req() req: any,
+    @Query('competence') competence?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.checklistService.findMonthlyWorkforce(req.user, competence, search);
   }
 
   @Get()
   @UseGuards(JwtGuard)
-  findAll(@Req() req: any) {
-    return this.checklistService.findAll(req.user);
+  findAll(@Req() req: any, @Query() query: Record<string, unknown>) {
+    return this.checklistService.findAll(req.user, query);
   }
 
   @Get('history')
   @UseGuards(JwtGuard)
   findHistory(@Req() req: any, @Query() query: Record<string, unknown>) {
     return this.checklistService.findHistory(query, req.user);
+  }
+
+  @Get('history/:id')
+  @UseGuards(JwtGuard)
+  findHistoryDetail(@Req() req: any, @Param('id') id: string) {
+    return this.checklistService.findHistoryDetail(id, req.user);
   }
 
   @Get('ti-report')

@@ -3,7 +3,10 @@ import { normalizeFilial, type FilialValue } from './filial';
 
 export type AuthenticatedActor = {
   sub?: string | null;
+  email?: string | null;
+  name?: string | null;
   role?: string | null;
+  canExecuteMaintenance?: boolean | null;
 };
 
 export type SupervisorFleetScope = {

@@ -6,10 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  USINA_FORECAST_CONTEXT,
-  canAccessUsinaForecasts,
-} from '../usina-forecasts/usina-forecasts.service';
+import { USINA_FORECAST_CONTEXT } from '../usina-forecasts/usina-forecasts.service';
 import {
   calculateUsinaProductionMonths,
   calculateUsinaRevenueMonths,
@@ -46,6 +43,20 @@ function parseYear(value: unknown) {
     throw new BadRequestException('Ano deve estar entre 2025 e 2100');
   }
   return year;
+}
+
+export function canAccessUsinaMonthlyResult(role?: string | null) {
+  return [
+    'licitacao_gestor',
+    'admin',
+    'administrador',
+    'gestor',
+    'ceo',
+  ].includes(
+    String(role || '')
+      .trim()
+      .toLowerCase(),
+  );
 }
 
 function value(value: unknown) {
@@ -398,7 +409,7 @@ export class UsinaMonthlyResultService {
   ) {}
 
   async findAnnual(yearValue: unknown, actorRole?: string | null) {
-    if (!canAccessUsinaForecasts(actorRole)) {
+    if (!canAccessUsinaMonthlyResult(actorRole)) {
       throw new ForbiddenException(
         'Sem permissão para acessar o resultado mensal da Usina',
       );

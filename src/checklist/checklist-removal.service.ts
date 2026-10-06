@@ -147,7 +147,7 @@ export class ChecklistRemovalService {
       async (tx) => {
         // A mesma trava por frota usada na criacao impede uma nova inspecao
         // de competir com a remocao do checklist mensal.
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${vehicleId}, 0))`;
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${vehicleId}, 0))::text AS lock_result`;
         await tx.$queryRaw`SELECT "id" FROM "Vehicle" WHERE "id" = ${vehicleId} FOR UPDATE`;
         await tx.$queryRaw`SELECT "id" FROM "Checklist" WHERE "id" = ${id} FOR UPDATE`;
         const snapshot = await readSnapshot(tx, id);

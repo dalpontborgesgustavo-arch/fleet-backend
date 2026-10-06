@@ -26,6 +26,18 @@ export class ContractsController {
     return this.service.findOne(id, req.user?.role);
   }
 
+  @Put(':id/type')
+  updateType(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.service.updateType(id, body, req.user?.role, {
+      id: req.user?.sub,
+      name: req.user?.name || req.user?.email,
+    });
+  }
+
   @Put(':id/workflow')
   updateWorkflow(
     @Req() req: any,

@@ -65,6 +65,13 @@ export function reconcileUsinaAsphaltEquipmentCosts(input: {
   year: number;
   groups: EquipmentGroup[];
   rateMonths: RateMonth[];
+  assignments?: Array<{
+    competence: Date;
+    teamId: string;
+    category: string;
+    deletedAt?: Date | null;
+  }>;
+  coveredCompetences?: Set<string>;
 }) {
   const negativeAllocated = input.groups.filter(
     (group) =>
@@ -127,7 +134,20 @@ export function reconcileUsinaAsphaltEquipmentCosts(input: {
     const monthAggregates = [...aggregates.values()].filter(
       (entry) => entry.competence === competence,
     );
-    const teamIds = [...new Set(monthAggregates.map((entry) => entry.teamId))];
+    const monthAssignments = (input.assignments || []).filter(
+      (assignment) =>
+        !assignment.deletedAt &&
+        assignment.competence.toISOString().slice(0, 10) === competence &&
+        ASPHALT_EQUIPMENT_COST_CATEGORIES.some(
+          (definition) => definition.category === assignment.category,
+        ),
+    );
+    const teamIds = [
+      ...new Set([
+        ...monthAggregates.map((entry) => entry.teamId),
+        ...monthAssignments.map((entry) => entry.teamId),
+      ]),
+    ];
 
     return {
       competence,
@@ -154,18 +174,32 @@ export function reconcileUsinaAsphaltEquipmentCosts(input: {
             const rate = rateMonth?.categories.find(
               (entry) => entry.category === definition.category,
             );
+            const assigned = monthAssignments.some(
+              (entry) =>
+                entry.teamId === teamId &&
+                entry.category === definition.category,
+            );
+            const sourceCovered = Boolean(
+              input.coveredCompetences?.has(competence),
+            );
             const productiveHours = productive
               ? productive.hours.toFixed(6)
-              : null;
+              : assigned && sourceCovered
+                ? '0.000000'
+                : null;
             const unproductiveHours = unproductive
               ? unproductive.hours.toFixed(6)
-              : null;
+              : assigned && sourceCovered
+                ? '0.000000'
+                : null;
             const productiveRate = rate?.productiveRate ?? null;
             const unproductiveRate = rate?.unproductiveRate ?? null;
 
             return {
               category: definition.category,
               label: definition.label,
+              assigned,
+              sourceCovered,
               productiveFacts: productive?.facts ?? null,
               unproductiveFacts: unproductive?.facts ?? null,
               productiveHours,

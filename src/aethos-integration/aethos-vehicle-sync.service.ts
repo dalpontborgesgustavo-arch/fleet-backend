@@ -6,6 +6,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { setVehicleAuditContext } from '../vehicles/vehicle-audit-context';
 
 type AnyRow = Record<string, unknown>;
 
@@ -1074,6 +1075,11 @@ export class AethosVehicleSyncService {
           });
           if (replay) return;
 
+          await setVehicleAuditContext(tx, {
+            source: 'AETHOS',
+            name: 'Integracao Aethos',
+          });
+
           for (const entry of planned) {
             if (entry.existing) {
               await tx.vehicle.update({
@@ -1185,6 +1191,12 @@ export class AethosVehicleSyncService {
                 applicationMessage =
                   'Reativacao recebida, mas o veiculo nao consta na fotografia ativa atual.';
               } else {
+                await setVehicleAuditContext(tx, {
+                  source: 'AETHOS',
+                  userId: event.changedByUserId,
+                  name: event.changedByName || 'Integracao Aethos',
+                  email: event.changedByLogin,
+                });
                 await tx.vehicle.update({
                   where: { id: resolution.vehicle.id },
                   data: {

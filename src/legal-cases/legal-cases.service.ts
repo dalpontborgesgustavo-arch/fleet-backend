@@ -6,8 +6,9 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { S3UploadService } from '../storage/s3-upload.service';
 
-const ALLOWED_ROLES = new Set(['admin', 'juridico', 'gestor', 'ceo']);
+const ALLOWED_ROLES = new Set(['juridico', 'gestor', 'ceo']);
 const AREAS = new Set(['TRABALHISTA', 'CIVEL']);
 const COMPANIES = new Set([
   'JR_CONSTRUCOES',
@@ -194,6 +195,19 @@ function serializeCase(row: any) {
     finalPaidAmount: decimalNumber(row.finalPaidAmount),
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
+    attachmentCount:
+      row._count?.attachments ??
+      row.attachments?.filter((attachment: any) => attachment.active).length ??
+      0,
+    attachments: row.attachments?.map((attachment: any) => ({
+      id: attachment.id,
+      fileName: attachment.fileName,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      uploadedById: attachment.uploadedById,
+      uploadedByName: attachment.uploadedByName,
+      createdAt: iso(attachment.createdAt),
+    })),
     audits: row.audits?.map((audit: any) => ({
       ...audit,
       changedAt: iso(audit.changedAt),
@@ -332,7 +346,10 @@ export function aggregateLegalDashboard(
 
 @Injectable()
 export class LegalCasesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: S3UploadService,
+  ) {}
 
   private where(query: Row, includeYear = false): Prisma.LegalCaseWhereInput {
     const where: Prisma.LegalCaseWhereInput = { active: true };
@@ -392,6 +409,9 @@ export class LegalCasesService {
         orderBy: [{ updatedAt: 'desc' }, { processNumber: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
+        include: {
+          _count: { select: { attachments: { where: { active: true } } } },
+        },
       }),
       this.prisma.legalCase.count({ where }),
       this.prisma.legalCase.findMany({
@@ -465,10 +485,146 @@ export class LegalCasesService {
     ensureLegalCasesAccess(role);
     const row = await this.prisma.legalCase.findFirst({
       where: { id, active: true },
-      include: { audits: { orderBy: { changedAt: 'desc' } } },
+      include: {
+        audits: { orderBy: { changedAt: 'desc' } },
+        attachments: {
+          where: { active: true },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
     });
     if (!row) throw new NotFoundException('Processo juridico nao encontrado');
     return serializeCase(row);
+  }
+
+  async attachFile(
+    id: string,
+    file: {
+      buffer: Buffer;
+      mimetype: string;
+      originalname: string;
+      size?: number;
+    },
+    role: string | null | undefined,
+    actor: Actor,
+  ) {
+    ensureLegalCasesAccess(role);
+    if (!actor.id) {
+      throw new BadRequestException('Usuario autenticado nao encontrado');
+    }
+    const current = await this.prisma.legalCase.findFirst({
+      where: { id, active: true },
+    });
+    if (!current) {
+      throw new NotFoundException('Processo juridico nao encontrado');
+    }
+
+    const fileName = text(file.originalname, 255);
+    if (!fileName) throw new BadRequestException('Nome do arquivo obrigatorio');
+    const uploaded = await this.storage.uploadFile(file, 'legal-case');
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const attachment = await tx.legalCaseAttachment.create({
+          data: {
+            legalCaseId: id,
+            fileName,
+            fileKey: uploaded.key,
+            mimeType: nullableText(file.mimetype, 150),
+            sizeBytes: file.size ?? null,
+            uploadedById: actor.id,
+            uploadedByName: actor.name,
+          },
+        });
+        await tx.legalCaseAudit.create({
+          data: {
+            legalCaseId: id,
+            action: 'ATTACHMENT_ADD',
+            actorId: actor.id,
+            actorName: actor.name,
+            afterData: {
+              attachmentId: attachment.id,
+              fileName: attachment.fileName,
+              mimeType: attachment.mimeType,
+              sizeBytes: attachment.sizeBytes,
+            },
+          },
+        });
+      });
+    } catch (error) {
+      await this.storage.deleteFile(uploaded.key);
+      throw error;
+    }
+
+    return this.findOne(id, role);
+  }
+
+  async getAttachmentFile(
+    id: string,
+    attachmentId: string,
+    role?: string | null,
+  ) {
+    ensureLegalCasesAccess(role);
+    const attachment = await this.prisma.legalCaseAttachment.findFirst({
+      where: {
+        id: attachmentId,
+        legalCaseId: id,
+        active: true,
+        legalCase: { active: true },
+      },
+    });
+    if (!attachment) throw new NotFoundException('Anexo nao encontrado');
+    const file = await this.storage.getObject(attachment.fileKey);
+    return { attachment, file };
+  }
+
+  async deleteAttachment(
+    id: string,
+    attachmentId: string,
+    role: string | null | undefined,
+    actor: Actor,
+  ) {
+    ensureLegalCasesAccess(role);
+    if (!actor.id) {
+      throw new BadRequestException('Usuario autenticado nao encontrado');
+    }
+    const attachment = await this.prisma.legalCaseAttachment.findFirst({
+      where: {
+        id: attachmentId,
+        legalCaseId: id,
+        active: true,
+        legalCase: { active: true },
+      },
+    });
+    if (!attachment) throw new NotFoundException('Anexo nao encontrado');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.legalCaseAttachment.update({
+        where: { id: attachmentId },
+        data: {
+          active: false,
+          deletedAt: new Date(),
+          deletedById: actor.id,
+          deletedByName: actor.name,
+        },
+      });
+      await tx.legalCaseAudit.create({
+        data: {
+          legalCaseId: id,
+          action: 'ATTACHMENT_REMOVE',
+          actorId: actor.id,
+          actorName: actor.name,
+          beforeData: {
+            attachmentId: attachment.id,
+            fileName: attachment.fileName,
+            mimeType: attachment.mimeType,
+            sizeBytes: attachment.sizeBytes,
+          },
+        },
+      });
+    });
+    await this.storage.deleteFile(attachment.fileKey);
+    return this.findOne(id, role);
   }
 
   async create(body: Row, role: string | null | undefined, actor: Actor) {

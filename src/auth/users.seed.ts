@@ -22,7 +22,9 @@ export type UserRole =
   | 'qualidade'
   | 'almoxarifado'
   | 'licitacao'
+  | 'licitacao_gestor'
   | 'usina_icara'
+  | 'loja_jr'
   | 'admin';
 
 export type TipoFrota = 'Terraplanagem' | 'Caminhões' | 'Asfalto' | 'Veiculos';

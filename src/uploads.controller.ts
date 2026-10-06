@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Res } from '@nestjs/common';
+import { Controller, Get, NotFoundException, Param, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { Readable } from 'stream';
 import { S3UploadService } from './storage/s3-upload.service';
@@ -9,6 +9,9 @@ export class UploadsController {
 
   @Get(':key')
   async getFile(@Param('key') key: string, @Res() response: Response) {
+    if (key.startsWith('legal-case-')) {
+      throw new NotFoundException('Arquivo nao encontrado');
+    }
     const file = await this.s3UploadService.getObject(key);
     const body = file.Body as Readable;
 

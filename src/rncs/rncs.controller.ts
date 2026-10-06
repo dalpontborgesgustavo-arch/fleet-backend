@@ -6,6 +6,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
   Req,
   UploadedFile,
   UseGuards,
@@ -33,15 +34,25 @@ import {
 import { UpdateRncInvestigationDto } from './dto/update-rnc-investigation.dto';
 import { UpdateRncProgressDto } from './dto/update-rnc-progress.dto';
 import { RncsService } from './rncs.service';
+import { RncDashboardService } from './rnc-dashboard.service';
+import type { RncDashboardQuery } from './rnc-dashboard.service';
 
 @UseGuards(JwtGuard, RncProfileAccessGuard)
 @Controller('rncs')
 export class RncsController {
-  constructor(private readonly rncsService: RncsService) {}
+  constructor(
+    private readonly rncsService: RncsService,
+    private readonly rncDashboardService: RncDashboardService,
+  ) {}
 
   @Get()
   findAll(@Req() req: any) {
     return this.rncsService.findAll(req.user?.role, req.user?.sub);
+  }
+
+  @Get('dashboard')
+  dashboard(@Req() req: any, @Query() query: RncDashboardQuery) {
+    return this.rncDashboardService.getDashboard(query, req.user?.role);
   }
 
   @Get('aethos-items/:code')

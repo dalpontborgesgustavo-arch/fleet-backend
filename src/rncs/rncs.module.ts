@@ -5,6 +5,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { StorageModule } from '../storage/storage.module';
 import { RncEmailResponseController } from './rnc-email-response.controller';
+import { RncDashboardService } from './rnc-dashboard.service';
 import { RncProfileAccessGuard } from './rnc-profile-access.guard';
 import { RncsController } from './rncs.controller';
 import { RncsService } from './rncs.service';
@@ -18,6 +19,6 @@ import { RncsService } from './rncs.service';
     EmailModule,
   ],
   controllers: [RncEmailResponseController, RncsController],
-  providers: [RncsService, RncProfileAccessGuard],
+  providers: [RncsService, RncDashboardService, RncProfileAccessGuard],
 })
 export class RncsModule {}

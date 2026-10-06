@@ -529,6 +529,7 @@ export class RncsService {
         throw new BadRequestException('Usuario autenticado nao encontrado');
       }
       where.OR = [
+        { engineerId: actorId, type: RncType.INTERNAL },
         { responsibleUserId: actorId },
         {
           correctiveActions: {
@@ -548,6 +549,7 @@ export class RncsService {
         throw new BadRequestException('Usuario autenticado nao encontrado');
       }
       where.OR = [
+        { engineerId: actorId, type: RncType.INTERNAL },
         {
           correctiveActions: {
             some: { responsibleUserId: actorId },
@@ -579,6 +581,7 @@ export class RncsService {
       });
     } else if (actorId) {
       where.OR = [
+        { engineerId: actorId, type: RncType.INTERNAL },
         {
           correctiveActions: {
             some: { responsibleUserId: actorId },
@@ -3168,7 +3171,13 @@ export class RncsService {
 
   private ensureCanCreateRnc(role: string | null | undefined, type: RncType) {
     if (isEngineeringRole(role)) return;
-    if (isConsultantRole(role) && type === RncType.INTERNAL) return;
+    const normalized = normalizeRole(role);
+    if (
+      type === RncType.INTERNAL &&
+      normalized &&
+      normalized !== 'motorista' &&
+      normalized !== 'operador'
+    ) return;
     throw new ForbiddenException('Sem permissao para criar este tipo de RNC');
   }
 
@@ -3186,6 +3195,11 @@ export class RncsService {
     const role = normalizeRole(actorRole);
     if (canReadAllRncs(role)) return;
     if (isEngineeringRole(role)) return;
+    if (
+      actorId &&
+      rnc.type === RncType.INTERNAL &&
+      rnc.engineerId === actorId
+    ) return;
     if (
       isResponsibilityOnlyRole(role) &&
       actorId &&

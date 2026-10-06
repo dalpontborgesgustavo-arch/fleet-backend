@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Post,
@@ -33,19 +34,52 @@ export class VehiclesController {
     return this.service.findAll(req.user);
   }
 
+  @Get('report-summary')
+  @UseGuards(JwtGuard)
+  reportSummary(@Req() req: any) {
+    return this.service.reportSummary(req.user);
+  }
+
+  @Get('photo-backfill/preview')
+  @UseGuards(JwtGuard)
+  photoBackfillPreview(@Req() req: any) {
+    this.ensureAdmin(req.user?.role);
+    return this.service.previewPhotoBackfill();
+  }
+
+  @Post('photo-backfill/apply')
+  @UseGuards(JwtGuard)
+  applyPhotoBackfill(@Req() req: any) {
+    this.ensureAdmin(req.user?.role);
+    return this.service.applyPhotoBackfill(req.user);
+  }
+
   @Post()
-  create(@Body() data: any) {
-    return this.service.create(data);
+  @UseGuards(JwtGuard)
+  create(@Req() req: any, @Body() data: any) {
+    this.ensureAdmin(req.user?.role);
+    return this.service.create(data, req.user);
+  }
+
+  @Get(':id/history')
+  @UseGuards(JwtGuard)
+  history(@Req() req: any, @Param('id') id: string) {
+    this.ensureAdmin(req.user?.role);
+    return this.service.history(id);
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() data: any) {
-    return this.service.update(id, data);
+  @UseGuards(JwtGuard)
+  update(@Req() req: any, @Param('id') id: string, @Body() data: any) {
+    this.ensureAdmin(req.user?.role);
+    return this.service.update(id, data, req.user);
   }
 
   @Delete(':id')
-  delete(@Param('id') id: string) {
-    return this.service.delete(id);
+  @UseGuards(JwtGuard)
+  delete(@Req() req: any, @Param('id') id: string) {
+    this.ensureAdmin(req.user?.role);
+    return this.service.delete(id, req.user);
   }
 
   @UseGuards(JwtGuard)
@@ -53,5 +87,13 @@ export class VehiclesController {
   @UseInterceptors(FileInterceptor('file', imageUploadMulterOptions))
   async uploadFile(@UploadedFile(buildImageUploadPipe()) file: any) {
     return this.s3UploadService.uploadImage(file, 'vehicle');
+  }
+
+  private ensureAdmin(role?: string | null) {
+    if ((role || '').trim().toLowerCase() !== 'admin') {
+      throw new ForbiddenException(
+        'Somente o Administrador pode alterar o cadastro de veiculos.',
+      );
+    }
   }
 }

@@ -69,6 +69,7 @@ export class PartRequestsService {
     actorRole?: string | null,
     actorId?: string | null,
     occurrenceId?: string,
+    canExecuteMaintenance = false,
   ) {
     const role = normalizeRole(actorRole);
 
@@ -78,7 +79,7 @@ export class PartRequestsService {
       where.occurrenceId = occurrenceId;
     }
 
-    if (role === 'manutentor' && actorId) {
+    if ((role === 'manutentor' || canExecuteMaintenance) && actorId) {
       where.OR = [
         { requestedByUserId: actorId },
         { occurrence: { responsavelUserId: actorId } },
@@ -98,6 +99,7 @@ export class PartRequestsService {
     dto: CreatePartRequestDto,
     actorId?: string | null,
     actorRole?: string | null,
+    canExecuteMaintenance = false,
   ) {
     const role = normalizeRole(actorRole);
 
@@ -105,7 +107,7 @@ export class PartRequestsService {
       throw new BadRequestException('Usuario autenticado nao encontrado');
     }
 
-    if (role !== 'manutentor' && role !== 'admin') {
+    if (role !== 'manutentor' && role !== 'admin' && !canExecuteMaintenance) {
       throw new ForbiddenException(
         'Somente manutentor pode abrir solicitacao de peca',
       );
@@ -133,9 +135,12 @@ export class PartRequestsService {
       );
     }
 
-    if (role === 'manutentor' && occurrence.responsavelUserId !== actorId) {
+    if (
+      (role === 'manutentor' || canExecuteMaintenance) &&
+      occurrence.responsavelUserId !== actorId
+    ) {
       throw new ForbiddenException(
-        'Somente o manutentor responsavel pode abrir esta solicitacao',
+        'Somente o responsavel pela execucao pode abrir esta solicitacao',
       );
     }
 

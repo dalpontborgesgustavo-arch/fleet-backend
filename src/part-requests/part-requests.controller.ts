@@ -26,12 +26,18 @@ export class PartRequestsController {
       req.user?.role,
       req.user?.sub,
       occurrenceId,
+      req.user?.canExecuteMaintenance === true,
     );
   }
 
   @Post()
   create(@Req() req: any, @Body() dto: CreatePartRequestDto) {
-    return this.partRequestsService.create(dto, req.user?.sub, req.user?.role);
+    return this.partRequestsService.create(
+      dto,
+      req.user?.sub,
+      req.user?.role,
+      req.user?.canExecuteMaintenance === true,
+    );
   }
 
   @Put(':id/approve-maintenance')
