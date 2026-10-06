@@ -13,7 +13,13 @@ import { S3UploadService } from '../storage/s3-upload.service';
 import { buildLegacyEnvironmentalRecords } from './environmental-legacy-data';
 
 const ALLOWED_ROLES = new Set(['ssma', 'admin']);
-const ALLOWED_DOMAINS = new Set(['RESOURCE', 'WASTE', 'OPACITY', 'GHG']);
+const ALLOWED_DOMAINS = new Set([
+  'RESOURCE',
+  'WASTE',
+  'OPACITY',
+  'GHG',
+  'AIR_EMISSION',
+]);
 const ALLOWED_COMPANIES = new Set(['JR_CONSTRUCOES', 'PEDRAFORTE']);
 const RESOURCE_METRICS = new Set([
   'ENERGY_CONSUMPTION',
@@ -34,6 +40,29 @@ const GHG_METRICS = new Set([
   'PURCHASED_ELECTRICITY',
   'OTHER',
 ]);
+const AIR_POLLUTANTS = {
+  MP: {
+    unit: 'mg/Nm³',
+    regulation:
+      'Resolução CONSEMA/SC 190/2022 — Concreto Asfáltico, Seção II, Subseção IX, Art. 33, atividades de produção de asfalto.',
+  },
+  NOX: {
+    unit: 'mg/Nm³',
+    regulation:
+      'Resolução CONSEMA/SC 190/2022 — Concreto Asfáltico, Seção II, Subseção IX, Art. 33, atividades de produção de asfalto.',
+  },
+  SOX: {
+    unit: 'mg/Nm³',
+    regulation:
+      'Resolução CONSEMA/SC 190/2022 — Concreto Asfáltico, Seção II, Subseção IX, Art. 33, atividades de produção de asfalto.',
+  },
+  RINGELMANN: {
+    unit: 'nível Ringelmann',
+    regulation:
+      'Resolução CONSEMA/SC 190/2022 — Grau de enegrecimento da fumaça, Cap. II, Art. 13.',
+  },
+} as const;
+const AIR_POLLUTANT_METRICS = new Set(Object.keys(AIR_POLLUTANTS));
 
 type Attachment = {
   id: string;
@@ -291,6 +320,9 @@ export class EnvironmentalService implements OnModuleInit {
     };
 
     for (const record of records) {
+      // Resultados laboratoriais atmosféricos não são atividade de GEE nem
+      // quantidade somável aos indicadores mensais de recursos ou resíduos.
+      if (record.domain === 'AIR_EMISSION') continue;
       const key = monthKey(record.competence);
       const point = monthly.get(key) || {
         energyConsumptionKwh: 0,
@@ -558,10 +590,30 @@ export class EnvironmentalService implements OnModuleInit {
       'Empresa',
     );
     const metric = this.normalizeMetric(domain, data?.metric);
-    const amount = parseNumber(data?.amount, 'Quantidade');
-    const unit = optionalText(data?.unit, 50);
+    if (
+      domain === 'AIR_EMISSION' &&
+      !(
+        typeof data?.amount === 'number' ||
+        (typeof data?.amount === 'string' &&
+          /^\d+(?:[,.]\d+)?$/.test(data.amount.trim()))
+      )
+    ) {
+      throw new BadRequestException(
+        'Resultado deve conter somente números e, opcionalmente, decimais',
+      );
+    }
+    const amount = parseNumber(
+      data?.amount,
+      domain === 'AIR_EMISSION' ? 'Resultado' : 'Quantidade',
+    );
+    const pollutant =
+      domain === 'AIR_EMISSION'
+        ? AIR_POLLUTANTS[metric as keyof typeof AIR_POLLUTANTS]
+        : null;
+    const unit = pollutant?.unit || optionalText(data?.unit, 50);
     if (!unit) throw new BadRequestException('Unidade é obrigatória');
-    const factorId = optionalText(data?.factorId, 80);
+    const factorId =
+      domain === 'AIR_EMISSION' ? null : optionalText(data?.factorId, 80);
     let co2eKg: Prisma.Decimal | null = null;
 
     if (domain === 'GHG') {
@@ -596,12 +648,37 @@ export class EnvironmentalService implements OnModuleInit {
         'Resultado Ringelmann deve estar entre 1 e 5',
       );
     }
+    if (domain === 'AIR_EMISSION' && !recordedAt) {
+      throw new BadRequestException('Data da realização é obrigatória');
+    }
+    const competence = parseCompetence(data?.competence);
+    if (
+      domain === 'AIR_EMISSION' &&
+      monthKey(competence) !== monthKey(recordedAt!)
+    ) {
+      throw new BadRequestException(
+        'Competência deve corresponder à data da realização',
+      );
+    }
+
+    const details = parseDetails(data?.details) as Record<string, unknown>;
+    if (pollutant) {
+      const evaluator = optionalText(details.evaluator, 180);
+      if (!evaluator) {
+        throw new BadRequestException(
+          'Responsável pela avaliação é obrigatório',
+        );
+      }
+      details.lme = optionalText(details.lme, 500);
+      details.evaluator = evaluator;
+      details.regulation = pollutant.regulation;
+    }
 
     return {
       domain,
       metric,
       company,
-      competence: parseCompetence(data?.competence),
+      competence,
       recordedAt,
       site: optionalText(data?.site, 180),
       asset: optionalText(data?.asset, 180),
@@ -610,7 +687,7 @@ export class EnvironmentalService implements OnModuleInit {
       co2eKg,
       factorId: factorId || null,
       status: optionalText(data?.status, 40) || 'VALID',
-      details: parseDetails(data?.details),
+      details: details as Prisma.InputJsonValue,
       notes: optionalText(data?.notes, 4000),
       source: 'MANUAL',
     };
@@ -624,6 +701,9 @@ export class EnvironmentalService implements OnModuleInit {
       return enumValue(value, WASTE_METRICS, 'Categoria do resíduo');
     }
     if (domain === 'OPACITY') return 'RINGELMANN';
+    if (domain === 'AIR_EMISSION') {
+      return enumValue(value, AIR_POLLUTANT_METRICS, 'Poluente');
+    }
     return enumValue(value, GHG_METRICS, 'Categoria de emissão');
   }
 
