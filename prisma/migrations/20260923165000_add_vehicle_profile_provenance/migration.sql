@@ -1,0 +1,2 @@
+ALTER TABLE "CostPurchaseVehicleProfile"
+ADD COLUMN "provenance" TEXT NOT NULL DEFAULT 'USER_CONFIRMED';
