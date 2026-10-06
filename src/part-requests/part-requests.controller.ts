@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Post, Put, Query, Param, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Put,
+  Query,
+  Param,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtGuard } from '../auth/jwt.guard';
 import { PartRequestsService } from './part-requests.service';
 import { CreatePartRequestDto } from './dto/create-part-request.dto';
@@ -12,7 +22,11 @@ export class PartRequestsController {
 
   @Get()
   findAll(@Req() req: any, @Query('occurrenceId') occurrenceId?: string) {
-    return this.partRequestsService.findAll(req.user?.role, req.user?.sub, occurrenceId);
+    return this.partRequestsService.findAll(
+      req.user?.role,
+      req.user?.sub,
+      occurrenceId,
+    );
   }
 
   @Post()
@@ -22,16 +36,38 @@ export class PartRequestsController {
 
   @Put(':id/approve-maintenance')
   approveMaintenance(@Req() req: any, @Param('id') id: string) {
-    return this.partRequestsService.approveMaintenance(id, req.user?.sub, req.user?.role);
+    return this.partRequestsService.approveMaintenance(
+      id,
+      req.user?.sub,
+      req.user?.role,
+    );
   }
 
   @Put(':id/reject-maintenance')
-  rejectMaintenance(@Req() req: any, @Param('id') id: string, @Body() dto: ReviewPartRequestDto) {
-    return this.partRequestsService.rejectMaintenance(id, dto, req.user?.sub, req.user?.role);
+  rejectMaintenance(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: ReviewPartRequestDto,
+  ) {
+    return this.partRequestsService.rejectMaintenance(
+      id,
+      dto,
+      req.user?.sub,
+      req.user?.role,
+    );
   }
 
   @Put(':id/purchase-response')
-  respondPurchase(@Req() req: any, @Param('id') id: string, @Body() dto: RespondPartRequestDto) {
-    return this.partRequestsService.respondPurchase(id, dto, req.user?.sub, req.user?.role);
+  respondPurchase(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: RespondPartRequestDto,
+  ) {
+    return this.partRequestsService.respondPurchase(
+      id,
+      dto,
+      req.user?.sub,
+      req.user?.role,
+    );
   }
 }

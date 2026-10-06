@@ -1,26 +1,36 @@
 import {
   Body,
   Controller,
-  Get,
-  Post,
   Delete,
+  Get,
   Param,
+  Post,
   Put,
+  Req,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import * as fs from 'fs';
-import * as path from 'path';
+import { JwtGuard } from '../auth/jwt.guard';
+import {
+  buildImageUploadPipe,
+  imageUploadMulterOptions,
+} from '../storage/image-upload.util';
+import { S3UploadService } from '../storage/s3-upload.service';
 import { VehiclesService } from './vehicles.service';
 
 @Controller('vehicles')
 export class VehiclesController {
-  constructor(private readonly service: VehiclesService) {}
+  constructor(
+    private readonly service: VehiclesService,
+    private readonly s3UploadService: S3UploadService,
+  ) {}
 
   @Get()
-  findAll() {
-    return this.service.findAll();
+  @UseGuards(JwtGuard)
+  findAll(@Req() req: any) {
+    return this.service.findAll(req.user);
   }
 
   @Post()
@@ -38,22 +48,10 @@ export class VehiclesController {
     return this.service.delete(id);
   }
 
+  @UseGuards(JwtGuard)
   @Post('upload')
-  @UseInterceptors(FileInterceptor('file'))
-  uploadFile(@UploadedFile() file: any) {
-    const uploadsDir = path.join(process.cwd(), 'uploads');
-
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-    }
-
-    const safeName = `${Date.now()}-${file.originalname.replace(/\s+/g, '-')}`;
-    const filePath = path.join(uploadsDir, safeName);
-
-    fs.writeFileSync(filePath, file.buffer);
-
-    return {
-      url: `/uploads/${safeName}`,
-    };
+  @UseInterceptors(FileInterceptor('file', imageUploadMulterOptions))
+  async uploadFile(@UploadedFile(buildImageUploadPipe()) file: any) {
+    return this.s3UploadService.uploadImage(file, 'vehicle');
   }
 }

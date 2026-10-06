@@ -2,32 +2,25 @@ import {
   Controller,
   Post,
   UploadedFile,
-  UseInterceptors,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
 import { JwtGuard } from './auth/jwt.guard';
+import {
+  buildImageUploadPipe,
+  imageUploadMulterOptions,
+} from './storage/image-upload.util';
+import { S3UploadService } from './storage/s3-upload.service';
 
 @Controller('upload')
 export class UploadController {
+  constructor(private readonly s3UploadService: S3UploadService) {}
+
   @UseGuards(JwtGuard)
   @Post()
-  @UseInterceptors(
-    FileInterceptor('file', {
-      storage: diskStorage({
-        destination: './uploads',
-        filename: (_req, file, cb) => {
-          const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          cb(null, `${unique}${extname(file.originalname)}`);
-        },
-      }),
-    }),
-  )
-  uploadFile(@UploadedFile() file: { filename: string }) {
-    return {
-      url: `/uploads/${file.filename}`,
-    };
+  @UseInterceptors(FileInterceptor('file', imageUploadMulterOptions))
+  async uploadFile(@UploadedFile(buildImageUploadPipe()) file: any) {
+    return this.s3UploadService.uploadImage(file, 'upload');
   }
 }

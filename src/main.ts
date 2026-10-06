@@ -6,9 +6,18 @@ import * as express from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.useBodyParser('json', { limit: '10mb' });
+  app.useBodyParser('urlencoded', { limit: '10mb', extended: true });
+
+  const allowedOrigins = [
+    'https://app.jrconstrucoes.net.br',
+    'https://vehicle-checkup-pro.vercel.app',
+    'http://localhost:8080',
+    'http://localhost:3000',
+  ];
 
   app.enableCors({
-    origin: true,
+    origin: allowedOrigins,
     credentials: true,
   });
 
@@ -16,4 +25,4 @@ async function bootstrap() {
 
   await app.listen(3000);
 }
-bootstrap();
+void bootstrap();

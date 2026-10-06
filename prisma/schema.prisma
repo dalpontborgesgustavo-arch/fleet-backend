@@ -7,31 +7,1038 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Filial {
+  MATRIZ
+  NORTE
+  MAFRA
+  PEDRAFORTE
+  NAO_CLASSIFICADA
+}
+
+enum RollerType {
+  CHAPA
+  PNEU
+  TERRAPLANAGEM
+}
+
 model User {
-  id         String      @id @default(uuid())
-  email      String      @unique
+  id                              String                        @id @default(uuid())
+  email                           String                        @unique
+  name                            String
+  password                        String
+  role                            String
+  active                          Boolean                       @default(true)
+  mustChangePassword              Boolean                       @default(false)
+  phone                           String?
+  city                            String?
+  tipoFrota                       String?
+  filial                          Filial                        @default(MATRIZ)
+  canAccessTopographyInventory    Boolean                       @default(false)
+  canExecuteMaintenance           Boolean                       @default(false)
+  canAccessFleetTracking          Boolean                       @default(false)
+  canAccessFleetOverview          Boolean                       @default(false)
+  canAccessFleetUtilization       Boolean                       @default(false)
+  canAccessFleetAlerts            Boolean                       @default(false)
+  canAccessFleetVideo             Boolean                       @default(false)
+  canAccessBucketActivations      Boolean                       @default(false)
+  createdAt                       DateTime                      @default(now())
+  occurrences                     Occurrence[]
+  checklists                      Checklist[]
+  monthlyResponsibleChecklists    Checklist[]                   @relation("ChecklistMonthlyResponsible")
+  rncsEngineer                    Rnc[]                         @relation("RncEngineer")
+  rncsReviewed                    Rnc[]                         @relation("RncReviewer")
+  rncsResponsible                 Rnc[]                         @relation("RncResponsible")
+  rncsEffectivenessReviewed       Rnc[]                         @relation("RncEffectivenessReviewer")
+  rncSystemItemsIncluded          Rnc[]                         @relation("RncSystemItemIncludedBy")
+  rncItemsIncluded                RncItem[]                     @relation("RncItemIncludedBy")
+  rncAttachmentsUploaded          RncAttachment[]               @relation("RncAttachmentUploadedBy")
+  rncCorrectiveActionsResponsible RncCorrectiveAction[]         @relation("RncCorrectiveActionResponsible")
+  rncCorrectiveActionsCompleted   RncCorrectiveAction[]         @relation("RncCorrectiveActionCompletedBy")
+  rncHistory                      RncHistory[]                  @relation("RncHistoryActor")
+  rncAssignmentsSent              RncAssignment[]               @relation("RncAssignmentAssignedBy")
+  rncAssignmentsReceived          RncAssignment[]               @relation("RncAssignmentAssignedTo")
+  rncEmailTokensReceived          RncEmailToken[]               @relation("RncEmailTokenTargetUser")
+  pushTokens                      UserPushToken[]
+  topographyArrivals              TopographyArrival[]
+  topographyInventoriesCreated    TopographyInventory[]         @relation("TopographyInventoryCreatedBy")
+  topographyInventoriesUpdated    TopographyInventory[]         @relation("TopographyInventoryUpdatedBy")
+  topographyInventoryHistory      TopographyInventoryHistory[]  @relation("TopographyInventoryHistoryActor")
+  revenueForecasts                RevenueForecast[]             @relation("RevenueForecastCreatedBy")
+  taxForecastsUpdated             TaxForecast[]                 @relation("TaxForecastUpdatedBy")
+  usinaForecastsUpdated           UsinaForecast[]               @relation("UsinaForecastUpdatedBy")
+  usinaForecastHistory            UsinaForecastHistory[]        @relation("UsinaForecastHistoryActor")
+  ssmaLicenses                    SsmaLicense[]                 @relation("SsmaLicenseCreatedBy")
+  ssmaRenewals                    SsmaLicenseRenewal[]          @relation("SsmaRenewalCreatedBy")
+  environmentalRecordsCreated     EnvironmentalRecord[]         @relation("EnvironmentalRecordCreatedBy")
+  environmentalRecordsUpdated     EnvironmentalRecord[]         @relation("EnvironmentalRecordUpdatedBy")
+  environmentalFactorsCreated     EnvironmentalEmissionFactor[] @relation("EnvironmentalFactorCreatedBy")
+  hrCommunications                HrCommunication[]             @relation("HrCommunicationCreatedBy")
+  refreshTokens                   RefreshToken[]
+  budgetScenarios                 BudgetScenario[]              @relation("BudgetScenarioCreatedBy")
+  monthlyChecklistVehicles        Vehicle[]                     @relation("VehicleMonthlyChecklistResponsible")
+
+  @@index([filial])
+}
+
+model UserPushToken {
+  id         String   @id @default(uuid())
+  userId     String
+  token      String   @unique
+  platform   String?
+  deviceId   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  lastSeenAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([lastSeenAt])
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  tokenHash  String    @unique
+  userId     String
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model ConstructionControlState {
+  id        String   @id
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AethosObra {
+  id         String   @id @default(uuid())
+  code       String   @unique
   name       String
-  password   String
-  role       String
-  tipoFrota  String?
-  createdAt  DateTime    @default(now())
-  occurrences Occurrence[]
-  checklists Checklist[]
+  clientName String?
+  rawId      String?
+  active     Boolean  @default(true)
+  syncedAt   DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([name])
+  @@index([clientName])
+  @@index([active])
+}
+
+model AethosItem {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  description String
+  unit        String?
+  rawId       String?
+  active      Boolean  @default(true)
+  syncedAt    DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([description])
+  @@index([active])
+}
+
+model AethosObraCusto {
+  id          String   @id @default(uuid())
+  code        String
+  name        String?
+  competencia String
+  custoTotal  Decimal  @db.Decimal(18, 2)
+  origem      String
+  raw         Json?
+  active      Boolean  @default(true)
+  syncedAt    DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([code, competencia, origem])
+  @@index([code])
+  @@index([competencia])
+  @@index([active])
+}
+
+model AethosPurchaseOrder {
+  id                   String                       @id @default(uuid())
+  sourceOrderId        String
+  number               String
+  companyCode          String
+  companyName          String?
+  supplierName         String?
+  issuedAt             DateTime                     @db.Date
+  competence           String
+  status               String
+  sourceStatus         String?
+  approvalStatus       String
+  sourceApprovalStatus String?
+  requesterName        String?
+  buyerName            String?
+  pendingApproverName  String?
+  pendingApproval      Json?
+  approvedByName       String?
+  approvedAt           DateTime?
+  expectedDeliveryAt   DateTime?                    @db.Date
+  totalAmount          Decimal                      @db.Decimal(18, 3)
+  notes                String?                      @db.Text
+  raw                  Json?
+  sourceUpdatedAt      DateTime?
+  extractedAt          DateTime
+  active               Boolean                      @default(true)
+  contentHash          String
+  lastRunId            String
+  syncedAt             DateTime                     @default(now())
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+  items                AethosPurchaseOrderItem[]
+  history              AethosPurchaseOrderHistory[]
+
+  @@unique([companyCode, sourceOrderId])
+  @@index([competence, active])
+  @@index([status])
+  @@index([approvalStatus])
+  @@index([companyCode])
+  @@index([pendingApproverName])
+  @@index([pendingApproval], type: Gin)
+}
+
+model AethosPurchaseOrderItem {
+  id                   String              @id @default(uuid())
+  orderId              String
+  sourceItemId         String
+  lineType             String              @default("ITEM")
+  description          String
+  quantity             Decimal?            @db.Decimal(18, 6)
+  unit                 String?
+  unitPrice            Decimal?            @db.Decimal(18, 6)
+  totalAmount          Decimal             @db.Decimal(18, 3)
+  accountCode          String?
+  accountName          String?
+  pendingAmount        Decimal?            @db.Decimal(18, 3)
+  approvedAmount       Decimal?            @db.Decimal(18, 3)
+  openCommitmentAmount Decimal?            @db.Decimal(18, 3)
+  raw                  Json?
+  active               Boolean             @default(true)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  order                AethosPurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, sourceItemId])
+  @@index([accountCode])
+  @@index([orderId, active])
+}
+
+model AethosPurchaseOrderHistory {
+  id                   String              @id @default(uuid())
+  orderId              String
+  runId                String
+  status               String
+  sourceStatus         String?
+  approvalStatus       String
+  sourceApprovalStatus String?
+  totalAmount          Decimal             @db.Decimal(18, 3)
+  active               Boolean
+  pendingApproverName  String?
+  pendingApproval      Json?
+  contentHash          String
+  extractedAt          DateTime
+  snapshot             Json
+  createdAt            DateTime            @default(now())
+  order                AethosPurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@index([runId])
+}
+
+model AethosPurchaseOrderSyncRun {
+  id             String   @id @default(uuid())
+  runId          String   @unique
+  payloadHash    String
+  extractedAt    DateTime
+  receivedCount  Int
+  appliedCount   Int
+  staleCount     Int
+  unchangedCount Int
+  createdAt      DateTime @default(now())
+}
+
+model BudgetVersion {
+  id          String   @id @default(uuid())
+  year        Int
+  name        String
+  baseRevenue Decimal  @db.Decimal(18, 2)
+  active      Boolean  @default(true)
+  importedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lines     BudgetLine[]
+  scenarios BudgetScenario[]
+
+  @@unique([year, name])
+  @@index([year, active])
+}
+
+model BudgetLine {
+  id              String   @id @default(uuid())
+  versionId       String
+  idSubgrupo      String
+  descricao       String
+  annualCost      Decimal  @db.Decimal(18, 2)
+  monthlyCost     Decimal  @db.Decimal(18, 2)
+  referenceYear   Int
+  comparisonValue Decimal? @db.Decimal(18, 2)
+  responsible     String?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  version        BudgetVersion       @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  monthlyBudgets BudgetMonthlyLine[]
+
+  @@unique([versionId, idSubgrupo, descricao])
+  @@index([versionId])
+  @@index([idSubgrupo])
+  @@index([responsible])
+  @@index([active])
+}
+
+model BudgetMonthlyLine {
+  id          String   @id @default(uuid())
+  lineId      String
+  year        Int
+  month       Int
+  amount      Decimal  @db.Decimal(18, 2)
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  line BudgetLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+
+  @@unique([lineId, year, month])
+  @@index([year, month])
+  @@index([lineId])
+}
+
+model BudgetScenario {
+  id          String   @id @default(uuid())
+  versionId   String
+  name        String
+  revenue     Decimal  @db.Decimal(18, 2)
+  year        Int
+  month       Int?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  version   BudgetVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  createdBy User?         @relation("BudgetScenarioCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([versionId])
+  @@index([year, month])
+  @@index([createdById])
+}
+
+model AethosSubgroupActual {
+  id             String   @id @default(uuid())
+  matchKey       String   @unique
+  idSubgrupo     String
+  descricao      String?
+  competencia    String
+  valorRealizado Decimal  @db.Decimal(18, 2)
+  origem         String
+  obra           String?
+  centroCusto    String?
+  raw            Json?
+  active         Boolean  @default(true)
+  syncedAt       DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([idSubgrupo])
+  @@index([competencia])
+  @@index([active])
+  @@index([syncedAt])
+}
+
+model AethosPlanoContaCost {
+  id                     String    @id @default(uuid())
+  matchKey               String    @unique
+  idLancamento           String
+  codigoEmpresa          String?
+  nomeEmpresa            String?
+  codigoPlanoConta       String
+  nomePlanoConta         String?
+  competencia            String
+  dataBaseLancamento     DateTime?
+  dataLancamento         DateTime?
+  dataVencimento         DateTime?
+  temNotaFiscal          Boolean   @default(false)
+  idNotaFiscal           String?
+  numeroNotaFiscal       String?
+  dataEmissaoNotaFiscal  DateTime?
+  observacaoLancamento   String?   @db.Text
+  observacaoNotaFiscal   String?   @db.Text
+  valorCusto             Decimal   @db.Decimal(18, 2)
+  valorPago              Decimal?  @db.Decimal(18, 2)
+  valorSaldo             Decimal?  @db.Decimal(18, 2)
+  status                 String?
+  statusDescricao        String?
+  tipoDocumento          String?
+  tipoDocumentoDescricao String?
+  origem                 String
+  raw                    Json?
+  active                 Boolean   @default(true)
+  deactivatedAt          DateTime?
+  deactivationReason     String?
+  reconciliationId       String?
+  syncedAt               DateTime  @default(now())
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@unique([origem, idLancamento])
+  @@index([codigoPlanoConta])
+  @@index([competencia])
+  @@index([origem])
+  @@index([status])
+  @@index([active])
+  @@index([reconciliationId])
+  @@index([syncedAt])
+  @@index([dataBaseLancamento])
+  @@index([dataLancamento])
+  @@index([dataEmissaoNotaFiscal])
+}
+
+model AethosPlanoContaCostReconciliation {
+  id                   String   @id @default(uuid())
+  reconciliationId     String   @unique
+  payloadHash          String
+  origin               String
+  rule                 String
+  requestedCount       Int
+  foundCount           Int
+  deactivatedCount     Int
+  alreadyInactiveCount Int
+  notFoundCount        Int
+  totalValue           Decimal  @db.Decimal(18, 2)
+  idLancamentos        Json
+  metadata             Json?
+  executedAt           DateTime @default(now())
+
+  @@index([origin])
+  @@index([rule])
+  @@index([executedAt])
+}
+
+model AethosContract {
+  id                        String                     @id @default(uuid())
+  aethosId                  String                     @unique
+  quotationAethosId         String?
+  companyAethosId           String
+  workAethosId              String
+  workName                  String
+  contractorAethosId        String
+  contractorName            String
+  registeredAt              DateTime
+  startDate                 DateTime?
+  endDate                   DateTime?
+  finalizedAt               DateTime?
+  contractedAt              DateTime?
+  lastContractedAt          DateTime?
+  contractedByUser          String?
+  originalValue             Decimal                    @db.Decimal(18, 2)
+  statusCode                String
+  statusDescription         String
+  notes                     String?                    @db.Text
+  engineerAethosId          String?
+  engineerName              String?
+  retentionValue            Decimal?                   @db.Decimal(18, 2)
+  anticipatedRetentionValue Decimal?                   @db.Decimal(18, 2)
+  retentionBalance          Decimal?                   @db.Decimal(18, 2)
+  totalMeasuredValue        Decimal?                   @db.Decimal(18, 2)
+  payableBalance            Decimal?                   @db.Decimal(18, 2)
+  measurementBalance        Decimal?                   @db.Decimal(18, 2)
+  contractBalance           Decimal?                   @db.Decimal(18, 2)
+  contractQuantity          Decimal?                   @db.Decimal(18, 4)
+  movesFinancial            Boolean?
+  returnsWorkBalance        Boolean?
+  accountPlanAethosId       String?
+  accountPlanName           String?
+  cancellationReason        String?                    @db.Text
+  generatedAttachments      Json?
+  source                    String                     @default("AETHOS")
+  contentHash               String
+  lastSeenSyncId            String?
+  raw                       Json?
+  active                    Boolean                    @default(true)
+  syncedAt                  DateTime                   @default(now())
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  attachments               AethosContractAttachment[]
+  workflow                  ContractWorkflow?
+
+  @@index([companyAethosId])
+  @@index([workAethosId])
+  @@index([contractorAethosId])
+  @@index([statusCode])
+  @@index([contractedAt])
+  @@index([active])
+  @@index([syncedAt])
+  @@index([lastSeenSyncId])
+}
+
+model AethosContractAttachment {
+  id                 String         @id @default(uuid())
+  aethosId           String         @unique
+  contractId         String
+  documentAethosId   String
+  documentTypeAethos String
+  fileName           String
+  description        String?        @db.Text
+  extension          String?
+  mimeType           String?
+  sizeBytes          Int?
+  md5                String?
+  includedAt         DateTime?
+  storageType        String
+  sourceReference    String
+  fileKey            String?
+  fileUrl            String?
+  fileReceivedAt     DateTime?
+  source             String         @default("AETHOS")
+  raw                Json?
+  active             Boolean        @default(true)
+  syncedAt           DateTime       @default(now())
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  contract           AethosContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId])
+  @@index([active])
+  @@index([md5])
+  @@index([syncedAt])
+}
+
+model ContractWorkflow {
+  id                 String                  @id @default(uuid())
+  contractId         String                  @unique
+  type               String
+  status             String                  @default("IN_PROGRESS")
+  outcomeAt          DateTime?
+  cancellationReason String?                 @db.Text
+  notes              String?                 @db.Text
+  updatedById        String?
+  updatedByName      String?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  contract           AethosContract          @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  stages             ContractWorkflowStage[]
+
+  @@index([type])
+  @@index([status])
+  @@index([updatedAt])
+}
+
+model ContractWorkflowStage {
+  id               String           @id @default(uuid())
+  workflowId       String
+  key              String
+  sequence         Int
+  label            String
+  responsible      String
+  targetDays       Int?
+  targetUnit       String?
+  targetComparison String?
+  completedAt      DateTime?
+  notes            String?          @db.Text
+  updatedById      String?
+  updatedByName    String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  workflow         ContractWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@unique([workflowId, key])
+  @@index([workflowId, sequence])
+  @@index([completedAt])
+}
+
+model ThirdPartyMeasurement {
+  id                              String                                 @id @default(uuid())
+  aethosMeasurementId             String                                 @unique
+  aethosContractId                String
+  aethosWorkId                    String
+  workName                        String
+  workContract                    String?
+  contractorAethosId              String
+  contractorName                  String
+  engineerAethosId                String?
+  engineerName                    String?
+  measurementNumber               String?
+  measurementDescription          String?                                @db.Text
+  registeredAt                    DateTime?
+  startDate                       DateTime?
+  endDate                         DateTime?
+  competenceDate                  DateTime?
+  dueDate                         DateTime?
+  finalizedAt                     DateTime?
+  finalized                       Boolean                                @default(false)
+  measurementValue                Decimal?                               @db.Decimal(18, 2)
+  discountValue                   Decimal?                               @db.Decimal(18, 2)
+  retentionValue                  Decimal?                               @db.Decimal(18, 2)
+  totalValue                      Decimal?                               @db.Decimal(18, 2)
+  contractValue                   Decimal?                               @db.Decimal(18, 2)
+  totalMeasuredValue              Decimal?                               @db.Decimal(18, 2)
+  contractStatus                  String?
+  measurementNotes                String?                                @db.Text
+  contractNotes                   String?                                @db.Text
+  engineerDeliveryDate            DateTime?
+  engineerDeliveryTargetDate      DateTime?
+  engineerDelayReason             String?                                @db.Text
+  measurementApproved             Boolean?
+  rejectionReason                 String?                                @db.Text
+  resolutionDate                  DateTime?
+  zanandraDeliveryDate            DateTime?
+  invoiceRequestDate              DateTime?
+  contractorDocumentsDeliveryDate DateTime?
+  zanandraDeliveryTargetDate      DateTime?
+  invoiceRequestTargetDate        DateTime?
+  contractorDocumentsTargetDate   DateTime?
+  actualPaymentDate               DateTime?
+  type                            String?
+  administrativeNotes             String?                                @db.Text
+  source                          String                                 @default("AETHOS")
+  contentHash                     String
+  raw                             Json?
+  syncedAt                        DateTime                               @default(now())
+  createdAt                       DateTime                               @default(now())
+  updatedAt                       DateTime                               @updatedAt
+  items                           ThirdPartyMeasurementItem[]
+  history                         ThirdPartyMeasurementHistory[]
+  legacyImportRows                ThirdPartyMeasurementLegacyImportRow[]
+
+  @@index([aethosContractId])
+  @@index([aethosWorkId])
+  @@index([contractorAethosId])
+  @@index([engineerAethosId])
+  @@index([competenceDate])
+  @@index([dueDate])
+  @@index([finalized])
+  @@index([syncedAt])
+}
+
+model ThirdPartyMeasurementItem {
+  id                      String                @id @default(uuid())
+  measurementId           String
+  aethosMeasurementItemId String                @unique
+  aethosContractId        String
+  measurementNumber       String?
+  aethosWorkId            String
+  aethosContractItemId    String?
+  aethosBudgetItemId      String?
+  itemDescription         String                @db.Text
+  contractQuantity        Decimal?              @db.Decimal(18, 4)
+  contractValue           Decimal?              @db.Decimal(18, 2)
+  measuredQuantity        Decimal?              @db.Decimal(18, 4)
+  measuredPercentage      Decimal?              @db.Decimal(9, 4)
+  measuredValue           Decimal?              @db.Decimal(18, 2)
+  balanceQuantity         Decimal?              @db.Decimal(18, 4)
+  balanceValue            Decimal?              @db.Decimal(18, 2)
+  raw                     Json?
+  syncedAt                DateTime              @default(now())
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+  measurement             ThirdPartyMeasurement @relation(fields: [measurementId], references: [id], onDelete: Cascade)
+
+  @@index([measurementId])
+  @@index([aethosContractId])
+  @@index([aethosWorkId])
+  @@index([aethosContractItemId])
+}
+
+model ThirdPartyMeasurementHistory {
+  id            String                @id @default(uuid())
+  measurementId String
+  action        String
+  changedFields Json
+  actorId       String?
+  actorName     String?
+  createdAt     DateTime              @default(now())
+  measurement   ThirdPartyMeasurement @relation(fields: [measurementId], references: [id], onDelete: Cascade)
+
+  @@index([measurementId, createdAt])
+  @@index([actorId])
+}
+
+model ThirdPartyMeasurementLegacyImportBatch {
+  id                   String                                 @id @default(uuid())
+  sourceFileName       String
+  sourceFileSha256     String
+  candidateFileSha256  String
+  exceptionsFileSha256 String
+  fingerprint          String                                 @unique
+  status               String                                 @default("PENDING")
+  candidateCount       Int
+  exceptionMatrixCount Int
+  appliedCount         Int                                    @default(0)
+  unchangedCount       Int                                    @default(0)
+  conflictCount        Int                                    @default(0)
+  actorName            String?
+  metadata             Json?
+  startedAt            DateTime                               @default(now())
+  completedAt          DateTime?
+  rolledBackAt         DateTime?
+  createdAt            DateTime                               @default(now())
+  updatedAt            DateTime                               @updatedAt
+  rows                 ThirdPartyMeasurementLegacyImportRow[]
+  exceptions           ThirdPartyMeasurementLegacyException[]
+
+  @@index([status, createdAt])
+}
+
+model ThirdPartyMeasurementLegacyImportRow {
+  id             String                                 @id @default(uuid())
+  batchId        String
+  measurementId  String
+  sourceRow      Int
+  payloadSha256  String
+  classification String                                 @default("MATCH_UNICO")
+  status         String
+  sourcePayload  Json
+  previousValues Json
+  appliedValues  Json
+  createdAt      DateTime                               @default(now())
+  updatedAt      DateTime                               @updatedAt
+  batch          ThirdPartyMeasurementLegacyImportBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  measurement    ThirdPartyMeasurement                  @relation(fields: [measurementId], references: [id], onDelete: Restrict)
+
+  @@unique([batchId, sourceRow, payloadSha256])
+  @@index([measurementId, createdAt])
+  @@index([batchId, status])
+}
+
+model ThirdPartyMeasurementLegacyException {
+  id                  String                                 @id @default(uuid())
+  batchId             String
+  matrixRow           Int
+  exceptionType       String
+  groupKey            String?
+  sourceRowA          Int?
+  sourceRowB          Int?
+  contractNumber      String?
+  measurementNumber   String?
+  workNumber          String?
+  aethosMeasurementId String?
+  fieldName           String?
+  valueA              String?
+  valueB              String?
+  comparison          String?
+  reason              String?                                @db.Text
+  proposedAction      String?                                @db.Text
+  payloadSha256A      String?
+  payloadSha256B      String?
+  raw                 Json
+  status              String                                 @default("PENDING")
+  createdAt           DateTime                               @default(now())
+  updatedAt           DateTime                               @updatedAt
+  batch               ThirdPartyMeasurementLegacyImportBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@unique([batchId, matrixRow])
+  @@index([batchId, exceptionType])
+  @@index([aethosMeasurementId])
+}
+
+model ThirdPartyMeasurementSla {
+  id              String   @id @default(uuid())
+  key             String   @unique
+  label           String
+  baseDateField   String
+  targetDateField String
+  days            Int?
+  unit            String   @default("BUSINESS_DAYS")
+  active          Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([active])
+}
+
+model BucketActivationAddress {
+  id         String   @id @default(uuid())
+  key        String   @unique
+  latitude   Float
+  longitude  Float
+  address    String
+  source     String
+  raw        Json?
+  resolvedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([latitude, longitude])
+  @@index([resolvedAt])
+}
+
+model BucketActivationDailySnapshot {
+  date                   String   @id
+  payload                Json
+  eventCount             Int      @default(0)
+  addressCount           Int      @default(0)
+  unresolvedAddressCount Int      @default(0)
+  sourceSyncedAt         DateTime
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([sourceSyncedAt])
+}
+
+model HrCommunication {
+  id            String    @id @default(uuid())
+  type          String
+  status        String    @default("DRAFT")
+  title         String
+  subtitle      String?
+  body          String?
+  company       String?
+  department    String?
+  city          String?
+  position      String?
+  requirements  String?
+  benefits      String?
+  contact       String?
+  employeeName  String?
+  previousRole  String?
+  newRole       String?
+  promotionDate DateTime?
+  imageUrl      String?
+  priority      Boolean   @default(false)
+  startAt       DateTime?
+  endAt         DateTime?
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  createdBy User? @relation("HrCommunicationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([type])
+  @@index([status])
+  @@index([priority])
+  @@index([promotionDate])
+  @@index([startAt])
+  @@index([endAt])
+}
+
+model PrumareEnterprise {
+  id               String   @id @default(uuid())
+  name             String
+  tableName        String?
+  registry         String?
+  location         String?
+  city             String?
+  mapUrl           String?
+  status           String?
+  deliveryForecast String?
+  vgvTarget        Decimal? @db.Decimal(14, 2)
+  photoUrl         String?
+  mapImageUrl      String?
+  mapImageWidth    Int?
+  mapImageHeight   Int?
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  lots             PrumareLot[]
+  simulations      PrumareSimulation[]
+  receivables      PrumareReceivable[]
+  priceAdjustments PrumarePriceAdjustment[]
+}
+
+model PrumareBroker {
+  id        String   @id @default(uuid())
+  name      String
+  phone     String?
+  email     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lots PrumareLot[]
+
+  @@index([active])
+  @@index([name])
+}
+
+model PrumareLot {
+  id                                String    @id @default(uuid())
+  enterpriseId                      String
+  block                             String
+  lot                               String
+  areaM2                            Decimal?  @db.Decimal(12, 2)
+  price                             Decimal   @db.Decimal(14, 2)
+  status                            String    @default("Disponivel")
+  brokerId                          String?
+  buyerName                         String?
+  soldAt                            DateTime?
+  salePrice                         Decimal?  @db.Decimal(14, 2)
+  saleContractNumber                String?
+  saleDownPayment                   Decimal?  @db.Decimal(14, 2)
+  saleDownPayments                  Json?
+  saleInstallments                  Int?
+  saleFirstInstallmentDate          DateTime?
+  saleDueDay                        Int?
+  saleCustomInstallments            Json?
+  saleReinforcements                Json?
+  saleAnnualReinforcement           Decimal?  @db.Decimal(14, 2)
+  saleFirstReinforcementInstallment Int?
+  saleReinforcementMonths           Int[]     @default([])
+  saleMonthlyRatePercent            Decimal?  @db.Decimal(8, 4)
+  saleBrokerCommission              Decimal?  @db.Decimal(14, 2)
+  saleBarters                       Json?
+  paymentCondition                  String?
+  saleNotes                         String?
+  mapX                              Float?
+  mapY                              Float?
+  createdAt                         DateTime  @default(now())
+  updatedAt                         DateTime  @updatedAt
+
+  enterprise  PrumareEnterprise   @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
+  broker      PrumareBroker?      @relation(fields: [brokerId], references: [id], onDelete: SetNull)
+  simulations PrumareSimulation[]
+  receivables PrumareReceivable[]
+
+  @@unique([enterpriseId, block, lot])
+  @@index([enterpriseId])
+  @@index([brokerId])
+  @@index([status])
+  @@index([soldAt])
+}
+
+enum PrumareSimulationKind {
+  PRICE
+  TABLE
+}
+
+enum PrumareReceivableType {
+  ENTRADA
+  PARCELA
+  REFORCO
+  COMISSAO
+  PERMUTA
+}
+
+model PrumareIpcaIndex {
+  id        String   @id @default(uuid())
+  year      Int
+  month     Int
+  percent   Decimal  @db.Decimal(8, 4)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([year, month])
+  @@index([year, month])
+}
+
+model PrumareReceivable {
+  id              String                @id @default(uuid())
+  enterpriseId    String
+  lotId           String
+  type            PrumareReceivableType
+  installmentNo   Int?
+  dueDate         DateTime
+  baseValue       Decimal               @db.Decimal(14, 2)
+  correctedValue  Decimal               @db.Decimal(14, 2)
+  appliedIpcaRate Decimal               @default(0) @db.Decimal(12, 6)
+  ipcaSnapshot    Json?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  enterprise PrumareEnterprise @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
+  lot        PrumareLot        @relation(fields: [lotId], references: [id], onDelete: Cascade)
+
+  @@index([enterpriseId])
+  @@index([lotId])
+  @@index([dueDate])
+  @@index([type])
+}
+
+model PrumareSimulation {
+  id           String                @id @default(uuid())
+  enterpriseId String
+  lotId        String?
+  kind         PrumareSimulationKind
+  title        String?
+  createdBy    String?
+  inputs       Json
+  results      Json
+  createdAt    DateTime              @default(now())
+
+  enterprise PrumareEnterprise @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
+  lot        PrumareLot?       @relation(fields: [lotId], references: [id], onDelete: SetNull)
+
+  @@index([enterpriseId])
+  @@index([lotId])
+  @@index([createdBy])
+  @@index([kind])
+}
+
+model PrumarePriceAdjustment {
+  id            String   @id @default(uuid())
+  enterpriseId  String
+  percent       Decimal  @db.Decimal(8, 4)
+  affectedLots  Int
+  previousTotal Decimal  @db.Decimal(14, 2)
+  newTotal      Decimal  @db.Decimal(14, 2)
+  note          String?
+  createdBy     String?
+  createdAt     DateTime @default(now())
+
+  enterprise PrumareEnterprise @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
+
+  @@index([enterpriseId])
+  @@index([createdAt])
+  @@index([createdBy])
 }
 
 model Checklist {
-  id          String           @id @default(uuid())
-  title       String
-  vehicleId   String?
-  month       Int
-  year        Int
-  status      String
-  type        ChecklistType    @default(DAILY)
-  createdBy   String
-  createdAt   DateTime         @default(now())
-  items       ChecklistItem[]
-  user        User             @relation(fields: [createdBy], references: [id])
-  occurrences Occurrence[]
+  id                       String                    @id @default(uuid())
+  title                    String
+  vehicleId                String?
+  photoUrl                 String?
+  fleetPhotos              Json?
+  driverName               String?
+  responsibleName          String?
+  driverEmployeeKey        String?
+  responsibleEmployeeKey   String?
+  laborAssignments         Json?
+  vehicleStopped           Boolean                   @default(false)
+  month                    Int
+  year                     Int
+  status                   String
+  type                     ChecklistType             @default(DAILY)
+  createdBy                String
+  monthlyResponsibleUserId String?                   @map("monthly_responsible_user_id")
+  monthlyResponsibleName   String?                   @map("monthly_responsible_name")
+  assistedExecution        Boolean                   @default(false) @map("assisted_execution")
+  createdAt                DateTime                  @default(now())
+  capturedAt               DateTime?                 @map("captured_at")
+  items                    ChecklistItem[]
+  user                     User                      @relation(fields: [createdBy], references: [id])
+  monthlyResponsible       User?                     @relation("ChecklistMonthlyResponsible", fields: [monthlyResponsibleUserId], references: [id], onDelete: SetNull)
+  occurrences              Occurrence[]
+  consent                  ChecklistConsent?
+  assignmentChange         VehicleAssignmentHistory?
+
+  @@index([monthlyResponsibleUserId, year, month])
+  @@index([assistedExecution, year, month])
 }
 
 model ChecklistItem {
@@ -39,17 +1046,22 @@ model ChecklistItem {
   checklistId String
   label       String
   ok          Boolean
+  answer      String    @default("OK")
   createdAt   DateTime  @default(now())
   checklist   Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
 
   @@index([checklistId])
 }
+
 model ChecklistTemplate {
-  id          String              @id @default(uuid())
-  name        String
-  vehicleType String
-  createdAt   DateTime            @default(now())
-  questions   ChecklistQuestion[]
+  id           String              @id @default(uuid())
+  name         String
+  vehicleType  String
+  fleetNumbers String[]            @default([])
+  createdAt    DateTime            @default(now())
+  questions    ChecklistQuestion[]
+
+  @@index([vehicleType])
 }
 
 model ChecklistQuestion {
@@ -62,19 +1074,267 @@ model ChecklistQuestion {
 
   @@index([templateId])
 }
+
 model Vehicle {
-  id          String       @id @default(uuid())
-  name        String?
-  plate       String
-  model       String?
-  fleet       String?
-  type        String
-  vehicleType String
-  tipoFrota   String
-  active      Boolean      @default(true)
-  photoUrl    String?
-  createdAt   DateTime     @default(now())
-  occurrences Occurrence[]
+  id                            String                       @id @default(uuid())
+  name                          String?
+  plate                         String
+  model                         String?
+  fleet                         String?
+  group                         String?
+  subgroup                      String?
+  rollerType                    RollerType?
+  company                       String?
+  type                          String
+  vehicleType                   String
+  tipoFrota                     String
+  filial                        Filial                       @default(MATRIZ)
+  active                        Boolean                      @default(true)
+  checklistEnabled              Boolean                      @default(true) @map("checklist_enabled")
+  photoUrl                      String?
+  responsibleName               String?
+  responsibleEmail              String?
+  currentDriverName             String?
+  currentResponsibleName        String?
+  currentDriverEmployeeKey      String?
+  currentResponsibleEmployeeKey String?
+  monthlyChecklistResponsibleId String?                      @map("monthly_checklist_responsible_id")
+  hasTimeClockDevice            Boolean?
+  veiculoManutencao             Boolean                      @default(false) @map("veiculo_manutencao")
+  keepMonthlyCostReport         Boolean                      @default(true) @map("manter_relatorio_mensal")
+  aethosVehicleId               String?                      @unique @map("aethos_vehicle_id")
+  aethosManaged                 Boolean                      @default(false) @map("aethos_managed")
+  aethosCompanyId               String?                      @map("aethos_company_id")
+  aethosSyncedAt                DateTime?                    @map("aethos_synced_at") @db.Timestamptz(6)
+  aethosRaw                     Json?                        @map("aethos_raw")
+  createdAt                     DateTime                     @default(now())
+  occurrences                   Occurrence[]
+  checklistConsents             ChecklistConsent[]
+  manutencaoHistorico           VehicleMaintenanceHistory[]
+  assignmentHistory             VehicleAssignmentHistory[]
+  aethosStatusHistory           AethosVehicleStatusEvent[]
+  costPurchaseProfiles          CostPurchaseVehicleProfile[]
+  monthlyChecklistResponsible   User?                        @relation("VehicleMonthlyChecklistResponsible", fields: [monthlyChecklistResponsibleId], references: [id], onDelete: SetNull)
+
+  @@index([filial])
+  @@index([monthlyChecklistResponsibleId])
+  @@index([aethosManaged, active])
+  @@index([aethosSyncedAt])
+}
+
+model FleetResultMonthlySetting {
+  id                  String    @id @default(uuid())
+  competence          DateTime  @db.Date
+  groupKey            String
+  maintenancePlanned  Decimal?  @db.Decimal(18, 2)
+  dieselPlanned       Decimal?  @db.Decimal(18, 2)
+  depreciationPlanned Decimal?  @db.Decimal(18, 2)
+  laborPlanned        Decimal?  @db.Decimal(18, 2)
+  revenuePlanned      Decimal?  @db.Decimal(18, 2)
+  createdById         String?
+  updatedById         String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  audit               FleetResultMonthlySettingAudit[]
+
+  @@unique([competence, groupKey])
+  @@index([competence])
+}
+
+model FleetResultMonthlySettingAudit {
+  id         BigInt                    @id @default(autoincrement())
+  settingId  String
+  action     String
+  actorId    String?
+  beforeData Json?
+  afterData  Json
+  createdAt  DateTime                  @default(now())
+  setting    FleetResultMonthlySetting @relation(fields: [settingId], references: [id], onDelete: Restrict)
+
+  @@index([settingId, createdAt])
+}
+
+model CostPurchaseVehicleProfile {
+  id                    BigInt   @id @default(autoincrement())
+  vehicleId             String   @map("vehicle_id")
+  effectiveFrom         DateTime @map("effective_from") @db.Date
+  provenance            String   @default("USER_CONFIRMED")
+  group                 String?
+  subgroup              String?
+  company               String?
+  tipoFrota             String   @map("tipo_frota")
+  vehicleType           String   @map("vehicle_type")
+  filial                Filial
+  keepMonthlyCostReport Boolean  @default(true) @map("keep_monthly_cost_report")
+  veiculoManutencao     Boolean  @default(false) @map("veiculo_manutencao")
+  changedByUserId       String?  @map("changed_by_user_id")
+  changedByName         String?  @map("changed_by_name")
+  changedByEmail        String?  @map("changed_by_email")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  vehicle               Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@unique([vehicleId, effectiveFrom])
+  @@index([effectiveFrom])
+  @@map("CostPurchaseVehicleProfile")
+}
+
+model VehicleAssignmentHistory {
+  id                      String    @id @default(uuid())
+  vehicleId               String
+  checklistId             String    @unique
+  previousDriverName      String?
+  driverName              String?
+  previousResponsibleName String?
+  responsibleName         String
+  vehicleStopped          Boolean   @default(false)
+  driverChanged           Boolean   @default(false)
+  responsibleChanged      Boolean   @default(false)
+  notificationRecipients  String[]  @default([])
+  notificationSentAt      DateTime?
+  notificationError       String?
+  changedBy               String
+  createdAt               DateTime  @default(now())
+
+  vehicle   Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  checklist Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, createdAt])
+  @@index([createdAt])
+}
+
+model AethosVehicleSyncRun {
+  id               BigInt   @id @default(autoincrement())
+  snapshotId       String   @unique @map("snapshot_id")
+  generatedAt      DateTime @map("generated_at") @db.Timestamptz(6)
+  executedAt       DateTime @default(now()) @map("executed_at") @db.Timestamptz(6)
+  payloadHash      String   @map("payload_hash")
+  receivedCount    Int      @map("received_count")
+  createdCount     Int      @map("created_count")
+  linkedCount      Int      @map("linked_count")
+  updatedCount     Int      @map("updated_count")
+  reactivatedCount Int      @map("reactivated_count")
+  deactivatedCount Int      @map("deactivated_count")
+  result           Json
+
+  @@index([executedAt])
+  @@map("AethosVehicleSyncRun")
+}
+
+model AethosVehicleStatusEvent {
+  id                 BigInt    @id @default(autoincrement())
+  aethosEventId      String    @unique @map("aethos_event_id")
+  aethosVehicleId    String    @map("aethos_vehicle_id")
+  vehicleId          String?   @map("vehicle_id")
+  companyId          String    @map("company_id")
+  fleet              String?
+  plate              String?
+  previousStatus     String    @map("previous_status")
+  currentStatus      String    @map("current_status")
+  changedAt          DateTime  @map("changed_at") @db.Timestamptz(6)
+  changedByUserId    String?   @map("changed_by_user_id")
+  changedByLogin     String?   @map("changed_by_login")
+  changedByName      String?   @map("changed_by_name")
+  effectiveEndAt     DateTime? @map("effective_end_at") @db.Timestamptz(6)
+  inactiveReason     String?   @map("inactive_reason")
+  source             String?   @map("source")
+  applicationStatus  String    @map("application_status")
+  applicationMessage String?   @map("application_message")
+  receivedAt         DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
+  appliedAt          DateTime? @map("applied_at") @db.Timestamptz(6)
+  raw                Json
+
+  vehicle Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+
+  @@index([aethosVehicleId, changedAt])
+  @@index([vehicleId, changedAt])
+  @@index([applicationStatus])
+  @@map("AethosVehicleStatusEvent")
+}
+
+model VehicleMaintenanceHistory {
+  id                BigInt    @id @default(autoincrement())
+  vehicleId         String    @map("vehicle_id")
+  veiculoManutencao Boolean   @map("veiculo_manutencao")
+  dtInicio          DateTime  @map("dt_inicio") @db.Timestamptz(6)
+  dtFim             DateTime? @map("dt_fim") @db.Timestamptz(6)
+  usuarioAlteracao  String?   @map("usuario_alteracao")
+  dtAlteracao       DateTime  @default(now()) @map("dt_alteracao") @db.Timestamptz(6)
+  vehicle           Vehicle   @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, dtInicio])
+  @@index([dtInicio, dtFim])
+  @@map("VehicleMaintenanceHistory")
+}
+
+model VehicleRegistrationAudit {
+  id              BigInt   @id @default(autoincrement())
+  vehicleId       String   @map("vehicle_id")
+  operation       String
+  source          String
+  changedFields   String[] @default([]) @map("changed_fields")
+  beforeData      Json?    @map("before_data")
+  afterData       Json?    @map("after_data")
+  changedByUserId String?  @map("changed_by_user_id")
+  changedByName   String?  @map("changed_by_name")
+  changedByEmail  String?  @map("changed_by_email")
+  changedAt       DateTime @default(now()) @map("changed_at") @db.Timestamptz(6)
+
+  @@index([vehicleId, changedAt])
+  @@index([changedAt])
+  @@map("VehicleRegistrationAudit")
+}
+
+enum ChecklistConsentStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+model ChecklistConsent {
+  id                String                 @id @default(uuid())
+  checklistId       String                 @unique
+  vehicleId         String
+  responsibleName   String?
+  responsibleEmail  String
+  tokenHash         String                 @unique
+  status            ChecklistConsentStatus @default(PENDING)
+  sentAt            DateTime?
+  lastEmailError    String?
+  lastReminderAt    DateTime?
+  lastReminderError String?
+  reminderCount     Int                    @default(0)
+  consentedAt       DateTime?
+  rejectedAt        DateTime?
+  note              String?
+  responseIp        String?
+  responseUserAgent String?
+  expiresAt         DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  checklist Checklist               @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  vehicle   Vehicle                 @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  tokens    ChecklistConsentToken[]
+
+  @@index([vehicleId])
+  @@index([status])
+  @@index([responsibleEmail])
+}
+
+model ChecklistConsentToken {
+  id        String    @id @default(uuid())
+  consentId String
+  tokenHash String    @unique
+  kind      String    @default("INITIAL")
+  expiresAt DateTime?
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  consent ChecklistConsent @relation(fields: [consentId], references: [id], onDelete: Cascade)
+
+  @@index([consentId])
+  @@index([expiresAt])
 }
 
 enum OccurrenceStatus {
@@ -106,50 +1366,75 @@ enum ChecklistType {
 }
 
 model Occurrence {
-  id                String             @id @default(uuid())
-  vehicleId         String
-  checklistId       String?
-  questionId        String?
-  questionLabel     String
-  description       String
-  status            OccurrenceStatus   @default(PENDING_SUPERVISOR)
-  severity          OccurrenceSeverity @default(MEDIUM)
-  createdBy         String
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  id            String             @id @default(uuid())
+  vehicleId     String
+  checklistId   String?
+  questionId    String?
+  questionLabel String
+  description   String
+  status        OccurrenceStatus   @default(PENDING_SUPERVISOR)
+  severity      OccurrenceSeverity @default(MEDIUM)
+  isEmergency   Boolean            @default(false)
+  createdBy     String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
 
-  localExecucao     String?
-  responsavelUserId String?
-  dataEntrada       DateTime?
-  dataPrevistaSaida DateTime?
-  entregaLimiteEm   DateTime?
-  entregueEm        DateTime?
-  entreguePorUserId String?
-  dataInicioExecucao DateTime?
-  dataConclusao     DateTime?
+  localExecucao           String?
+  responsavelUserId       String?
+  maintenanceTargetUserId String?
+  dataEntrada             DateTime?
+  dataPrevistaSaida       DateTime?
+  entregaLimiteEm         DateTime?
+  entregueEm              DateTime?
+  entreguePorUserId       String?
+  dataInicioExecucao      DateTime?
+  dataConclusao           DateTime?
+  cancelledAt             DateTime?
+  cancelledById           String?
+  cancelledByName         String?
+  cancellationReason      String?   @db.Text
 
-  vehicle           Vehicle            @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  checklist         Checklist?         @relation(fields: [checklistId], references: [id], onDelete: SetNull)
-  user              User               @relation(fields: [createdBy], references: [id])
-  photos            OccurrencePhoto[]
-  partRequests      PartRequest[]
+  vehicle      Vehicle             @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  checklist    Checklist?          @relation(fields: [checklistId], references: [id], onDelete: SetNull)
+  user         User                @relation(fields: [createdBy], references: [id])
+  photos       OccurrencePhoto[]
+  comments     OccurrenceComment[]
+  partRequests PartRequest[]
 
   @@index([vehicleId])
   @@index([checklistId])
   @@index([createdBy])
   @@index([status])
+  @@index([isEmergency])
+  @@index([maintenanceTargetUserId])
   @@index([entregaLimiteEm])
+  @@index([cancelledAt])
 }
 
 model OccurrencePhoto {
-  id           String      @id @default(uuid())
+  id           String   @id @default(uuid())
   occurrenceId String
   url          String
-  createdAt    DateTime    @default(now())
+  createdAt    DateTime @default(now())
 
-  occurrence   Occurrence  @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  occurrence Occurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
 
   @@index([occurrenceId])
+}
+
+model OccurrenceComment {
+  id           String   @id @default(uuid())
+  occurrenceId String
+  authorId     String
+  authorName   String
+  text         String   @db.Text
+  createdAt    DateTime @default(now())
+
+  occurrence Occurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+
+  @@index([occurrenceId])
+  @@index([authorId])
+  @@index([createdAt])
 }
 
 model PartRequest {
@@ -172,9 +1457,2641 @@ model PartRequest {
   purchasedByUserId  String?
   purchasedAt        DateTime?
 
-  occurrence         Occurrence        @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  occurrence Occurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
 
   @@index([occurrenceId])
   @@index([status])
   @@index([requestedByUserId])
 }
+
+enum RncStatus {
+  PENDING_MANAGER_APPROVAL
+  AWAITING_CAUSER_EXPLANATION
+  CAUSER_EXPLANATION_RECEIVED
+  AWAITING_RESPONSIBLE_ACTION
+  AWAITING_CAUSE_ANALYSIS
+  RESPONSIBLE_ACTION_COMPLETED
+  RETURNED_FOR_ADJUSTMENT
+  REJECTED
+  CANCELLED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum RncHistoryAction {
+  CREATED
+  EDITED
+  CANCELLED
+  RESUBMITTED
+  UPDATED_PROGRESS
+  DIRECTED
+  EXPLANATION_SUBMITTED
+  RESPONSIBLE_ACTION_SUBMITTED
+  CORRECTIVE_PLAN_DECIDED
+  CAUSE_ANALYSIS_SUBMITTED
+  EFFECTIVENESS_REVIEWED
+  INVESTIGATION_UPDATED
+  ATTACHMENT_ADDED
+  CORRECTIVE_ACTION_COMPLETED
+  APPROVED
+  REJECTED
+  RETURNED
+}
+
+enum RncAssignmentStatus {
+  PENDING
+  ANSWERED
+  CANCELLED
+}
+
+enum RncType {
+  EXTERNAL
+  WORK
+  INTERNAL
+}
+
+model Rnc {
+  id                            String    @id @default(uuid())
+  number                        Int       @unique @default(autoincrement())
+  type                          RncType   @default(EXTERNAL)
+  cliente                       String
+  obra                          String
+  obraDescricao                 String?
+  responsavel                   String?
+  dataEntrada                   DateTime
+  dataLimiteRetorno             DateTime
+  etapaObra                     String
+  enquadramentoMotivo           String
+  valorRetidoInicial            Decimal   @db.Decimal(14, 2)
+  respondido                    Boolean   @default(false)
+  planoAcaoSolucao              String?
+  status                        RncStatus @default(PENDING_MANAGER_APPROVAL)
+  valorRetido                   Decimal?  @db.Decimal(14, 2)
+  dataAssinatura                DateTime?
+  obs                           String?
+  engineerId                    String
+  reviewedById                  String?
+  reviewedAt                    DateTime?
+  reviewReason                  String?
+  requiresInvestigation         Boolean   @default(false)
+  justificativasObservacoes     String?
+  ncArea                        String?
+  issuer                        String?
+  destinationSector             String?
+  responsibleUserId             String?
+  nonConformityDescription      String?
+  nonConformityAnalysis         String?
+  immediateReaction             String?
+  immediateResponsible          String?
+  immediateDate                 DateTime?
+  similarNonconformities        Boolean?
+  similarNonconformitiesComment String?
+  needsCorrectiveActionPlan     Boolean?
+  causeInvestigation            String?
+  identifiedCauses              String?
+  rootCause                     String?
+  causeFishbone                 Json?
+  causeFiveWhys                 Json?
+  actionsEffective              Boolean?
+  actionsEffectiveNotes         String?
+  requiresDocumentChange        Boolean?
+  requiresDocumentChangeNotes   String?
+  requiresRiskReview            Boolean?
+  requiresRiskReviewNotes       String?
+  effectivenessReviewedAt       DateTime?
+  effectivenessReviewedById     String?
+  internalMotivo                String?
+  internalCausador              String?
+  internalNomeColaborador       String?
+  valorNc                       Decimal?  @db.Decimal(14, 2)
+  colocarItemSistema            Boolean   @default(false)
+  internalCodigoItem            String?
+  internalDescricao             String?
+  internalQuantidade            Decimal?  @db.Decimal(14, 2)
+  internalUnidadeMedida         String?
+  internalValorUnitario         Decimal?  @db.Decimal(14, 2)
+  internalValorTotal            Decimal?  @db.Decimal(14, 2)
+  systemItemStatus              String    @default("NOT_REQUIRED")
+  systemItemIncludedAt          DateTime?
+  systemItemIncludedById        String?
+  photoUrl                      String?
+  cancelledAt                   DateTime?
+  cancelledById                 String?
+  cancelledByName               String?
+  cancelledByEmail              String?
+  cancellationReason            String?   @db.Text
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @updatedAt
+
+  engineer                User                  @relation("RncEngineer", fields: [engineerId], references: [id])
+  reviewedBy              User?                 @relation("RncReviewer", fields: [reviewedById], references: [id])
+  responsibleUser         User?                 @relation("RncResponsible", fields: [responsibleUserId], references: [id])
+  effectivenessReviewedBy User?                 @relation("RncEffectivenessReviewer", fields: [effectivenessReviewedById], references: [id])
+  systemItemIncludedBy    User?                 @relation("RncSystemItemIncludedBy", fields: [systemItemIncludedById], references: [id])
+  items                   RncItem[]
+  correctiveActions       RncCorrectiveAction[]
+  attachments             RncAttachment[]
+  history                 RncHistory[]
+  assignments             RncAssignment[]
+  emailTokens             RncEmailToken[]
+
+  @@index([engineerId])
+  @@index([reviewedById])
+  @@index([responsibleUserId])
+  @@index([effectivenessReviewedById])
+  @@index([systemItemIncludedById])
+  @@index([systemItemStatus])
+  @@index([status])
+  @@index([type])
+  @@index([dataLimiteRetorno])
+  @@index([cancelledAt])
+}
+
+model RncCorrectiveAction {
+  id                String    @id @default(uuid())
+  rncId             String
+  sequence          Int
+  description       String
+  responsible       String
+  responsibleUserId String?
+  dueDate           DateTime?
+  situation         String    @default("Pendente")
+  executionNotes    String?
+  completedAt       DateTime?
+  completedById     String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  rnc             Rnc             @relation(fields: [rncId], references: [id], onDelete: Cascade)
+  responsibleUser User?           @relation("RncCorrectiveActionResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  completedBy     User?           @relation("RncCorrectiveActionCompletedBy", fields: [completedById], references: [id])
+  evidence        RncAttachment[]
+
+  @@unique([rncId, sequence])
+  @@index([rncId])
+  @@index([situation])
+  @@index([responsibleUserId])
+  @@index([completedById])
+}
+
+model RncAttachment {
+  id                 String   @id @default(uuid())
+  rncId              String
+  correctiveActionId String?
+  fileName           String
+  fileUrl            String
+  fileKey            String?
+  mimeType           String?
+  sizeBytes          Int?
+  uploadedById       String
+  createdAt          DateTime @default(now())
+
+  rnc              Rnc                  @relation(fields: [rncId], references: [id], onDelete: Cascade)
+  correctiveAction RncCorrectiveAction? @relation(fields: [correctiveActionId], references: [id], onDelete: Cascade)
+  uploadedBy       User                 @relation("RncAttachmentUploadedBy", fields: [uploadedById], references: [id])
+
+  @@index([rncId])
+  @@index([correctiveActionId])
+  @@index([uploadedById])
+  @@index([createdAt])
+}
+
+model RncItem {
+  id           String    @id @default(uuid())
+  rncId        String
+  code         String?
+  description  String
+  quantity     Decimal   @db.Decimal(14, 2)
+  unit         String
+  unitValue    Decimal   @db.Decimal(14, 2)
+  totalValue   Decimal   @db.Decimal(14, 2)
+  status       String    @default("PENDING")
+  includedAt   DateTime?
+  includedById String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  rnc        Rnc   @relation(fields: [rncId], references: [id], onDelete: Cascade)
+  includedBy User? @relation("RncItemIncludedBy", fields: [includedById], references: [id])
+
+  @@index([rncId])
+  @@index([status])
+  @@index([includedById])
+}
+
+model RncAssignment {
+  id           String              @id @default(uuid())
+  rncId        String
+  assignedById String
+  assignedToId String
+  reason       String
+  response     String?
+  status       RncAssignmentStatus @default(PENDING)
+  respondedAt  DateTime?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  rnc         Rnc             @relation(fields: [rncId], references: [id], onDelete: Cascade)
+  assignedBy  User            @relation("RncAssignmentAssignedBy", fields: [assignedById], references: [id])
+  assignedTo  User            @relation("RncAssignmentAssignedTo", fields: [assignedToId], references: [id])
+  emailTokens RncEmailToken[]
+
+  @@index([rncId])
+  @@index([assignedById])
+  @@index([assignedToId])
+  @@index([status])
+}
+
+model RncEmailToken {
+  id                String    @id @default(uuid())
+  rncId             String
+  assignmentId      String?
+  targetUserId      String
+  targetEmail       String
+  tokenHash         String    @unique
+  kind              String    @default("ASSIGNMENT_RESPONSE")
+  sentAt            DateTime?
+  lastEmailError    String?
+  expiresAt         DateTime?
+  usedAt            DateTime?
+  responseIp        String?
+  responseUserAgent String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  rnc        Rnc            @relation(fields: [rncId], references: [id], onDelete: Cascade)
+  assignment RncAssignment? @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  targetUser User           @relation("RncEmailTokenTargetUser", fields: [targetUserId], references: [id])
+
+  @@index([rncId])
+  @@index([assignmentId])
+  @@index([targetUserId])
+  @@index([targetEmail])
+  @@index([expiresAt])
+}
+
+model RncHistory {
+  id        String           @id @default(uuid())
+  rncId     String
+  actorId   String
+  action    RncHistoryAction
+  note      String?
+  createdAt DateTime         @default(now())
+
+  rnc   Rnc  @relation(fields: [rncId], references: [id], onDelete: Cascade)
+  actor User @relation("RncHistoryActor", fields: [actorId], references: [id])
+
+  @@index([rncId])
+  @@index([actorId])
+}
+
+model TopographyArrival {
+  id                String   @id @default(uuid())
+  userId            String
+  workDate          String
+  obra              String
+  city              String?
+  locationUrl       String?
+  locationLatitude  Float?
+  locationLongitude Float?
+  photoUrl          String?
+  arrivalAt         DateTime
+  justification     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workDate])
+  @@index([userId])
+  @@index([workDate])
+  @@index([arrivalAt])
+}
+
+model TopographyInventoryMaterial {
+  id                String                    @id @default(uuid())
+  company           String
+  name              String
+  aethosItemCode    String?
+  aethosDescription String?
+  density           Decimal?                  @db.Decimal(10, 4)
+  inputUnit         String                    @default("M3")
+  active            Boolean                   @default(true)
+  sortOrder         Int                       @default(0)
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  inventoryItems    TopographyInventoryItem[]
+
+  @@unique([company, name])
+  @@unique([company, aethosItemCode])
+  @@index([company, active, sortOrder])
+  @@index([aethosItemCode])
+}
+
+model TopographyInventory {
+  id             String                       @id @default(uuid())
+  company        String
+  referenceYear  Int
+  referenceMonth Int
+  measuredAt     DateTime
+  source         String                       @default("SYSTEM")
+  createdById    String?
+  updatedById    String?
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
+  createdBy      User?                        @relation("TopographyInventoryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy      User?                        @relation("TopographyInventoryUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  items          TopographyInventoryItem[]
+  history        TopographyInventoryHistory[]
+
+  @@unique([company, referenceYear, referenceMonth])
+  @@index([company, referenceYear, referenceMonth])
+  @@index([measuredAt])
+  @@index([createdById])
+  @@index([updatedById])
+}
+
+model TopographyInventoryItem {
+  id              String                      @id @default(uuid())
+  inventoryId     String
+  materialId      String
+  volumeM3        Decimal                     @db.Decimal(18, 3)
+  densitySnapshot Decimal?                    @db.Decimal(10, 4)
+  tonnage         Decimal?                    @db.Decimal(18, 3)
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+  inventory       TopographyInventory         @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  material        TopographyInventoryMaterial @relation(fields: [materialId], references: [id])
+
+  @@unique([inventoryId, materialId])
+  @@index([inventoryId])
+  @@index([materialId])
+}
+
+model TopographyInventoryHistory {
+  id          String              @id @default(uuid())
+  inventoryId String
+  actorId     String?
+  action      String
+  snapshot    Json
+  createdAt   DateTime            @default(now())
+  inventory   TopographyInventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  actor       User?               @relation("TopographyInventoryHistoryActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([inventoryId, createdAt])
+  @@index([actorId])
+}
+
+model RevenueForecast {
+  id            String   @id @default(uuid())
+  obra          String
+  valorPrevisto Decimal  @db.Decimal(14, 2)
+  mes           Int
+  ano           Int
+  status        String   @default("Sem NF")
+  postponements Int      @default(0)
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  createdBy User? @relation("RevenueForecastCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([mes, ano])
+  @@index([status])
+  @@index([createdById])
+}
+
+model TaxForecast {
+  id             String   @id @default(uuid())
+  company        String
+  taxType        String
+  year           Int
+  month          Int
+  forecastAmount Decimal  @default(0) @db.Decimal(18, 2)
+  actualAmount   Decimal  @default(0) @db.Decimal(18, 2)
+  updatedById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  updatedBy User? @relation("TaxForecastUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([company, taxType, year, month])
+  @@index([year, month])
+  @@index([company])
+  @@index([taxType])
+  @@index([updatedById])
+}
+
+model TaxForecastAudit {
+  id            String   @id @default(uuid())
+  taxForecastId String
+  company       String
+  taxType       String
+  year          Int
+  month         Int
+  action        String
+  source        String
+  previousData  Json?
+  nextData      Json
+  changedById   String?
+  createdAt     DateTime @default(now())
+
+  @@index([taxForecastId, createdAt])
+  @@index([company, taxType, year, month, createdAt])
+  @@index([changedById])
+}
+
+model UsinaForecast {
+  id            String   @id @default(uuid())
+  companyId     String
+  companyName   String
+  unitId        String
+  unitName      String
+  competence    DateTime @db.Date
+  materialCode  String
+  materialName  String
+  indicatorCode String
+  indicatorName String
+  forecastValue Decimal? @db.Decimal(18, 6)
+  observation   String?
+  active        Boolean  @default(true)
+  updatedById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  updatedBy User?                  @relation("UsinaForecastUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  history   UsinaForecastHistory[]
+
+  @@unique([companyId, unitId, competence, materialCode, indicatorCode])
+  @@index([competence])
+  @@index([active])
+  @@index([materialCode, indicatorCode])
+  @@index([updatedById])
+}
+
+model UsinaForecastHistory {
+  id                  String   @id @default(uuid())
+  forecastId          String
+  companyId           String
+  unitId              String
+  competence          DateTime @db.Date
+  materialCode        String
+  indicatorCode       String
+  action              String
+  previousValue       Decimal? @db.Decimal(18, 6)
+  newValue            Decimal? @db.Decimal(18, 6)
+  previousObservation String?
+  newObservation      String?
+  actorId             String?
+  changedAt           DateTime @default(now())
+
+  forecast UsinaForecast @relation(fields: [forecastId], references: [id], onDelete: Cascade)
+  actor    User?         @relation("UsinaForecastHistoryActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([forecastId, changedAt])
+  @@index([competence])
+  @@index([actorId])
+}
+
+model UsinaMonthlyCostConfig {
+  id            String                      @id @default(uuid())
+  companyId     String
+  unitId        String
+  competence    DateTime                    @db.Date
+  version       Int
+  status        String
+  isCurrent     Boolean                     @default(false)
+  taxRate       Decimal                     @db.Decimal(10, 6)
+  observation   String?
+  changeReason  String?
+  createdById   String?
+  updatedById   String?
+  confirmedById String?
+  deletedById   String?
+  createdAt     DateTime                    @default(now())
+  updatedAt     DateTime                    @updatedAt
+  confirmedAt   DateTime?
+  deletedAt     DateTime?
+  equipment     UsinaMonthlyCostEquipment[]
+  audit         UsinaMonthlyCostAudit[]
+
+  @@unique([companyId, unitId, competence, version])
+  @@index([companyId, unitId, competence])
+  @@index([status, isCurrent])
+  @@index([deletedAt])
+}
+
+model UsinaMonthlyCostEquipment {
+  id              String                 @id @default(uuid())
+  configId        String
+  equipmentType   String
+  fleetNumber     String
+  aethosVehicleId Int
+  sortOrder       Int
+  createdById     String?
+  updatedById     String?
+  deletedById     String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  deletedAt       DateTime?
+  config          UsinaMonthlyCostConfig @relation(fields: [configId], references: [id], onDelete: Restrict)
+
+  @@index([configId, sortOrder])
+  @@index([aethosVehicleId])
+  @@index([deletedAt])
+}
+
+model UsinaMonthlyCostAudit {
+  id        String                 @id @default(uuid())
+  configId  String
+  action    String
+  note      String?
+  snapshot  Json?
+  actorId   String?
+  createdAt DateTime               @default(now())
+  config    UsinaMonthlyCostConfig @relation(fields: [configId], references: [id], onDelete: Restrict)
+
+  @@index([configId, createdAt])
+  @@index([actorId])
+}
+
+model UsinaAnnualDepreciation {
+  id            String                         @id @default(uuid())
+  companyId     String
+  unitId        String
+  exercise      Int
+  version       Int
+  annualValue   Decimal                        @db.Decimal(18, 2)
+  monthlyValue  Decimal                        @db.Decimal(18, 2)
+  observation   String?
+  status        String
+  isCurrent     Boolean                        @default(false)
+  changeReason  String?
+  createdById   String?
+  updatedById   String?
+  confirmedById String?
+  deletedById   String?
+  createdAt     DateTime                       @default(now())
+  updatedAt     DateTime                       @updatedAt
+  confirmedAt   DateTime?
+  deletedAt     DateTime?
+  audit         UsinaAnnualDepreciationAudit[]
+
+  @@unique([companyId, unitId, exercise, version])
+  @@index([companyId, unitId, exercise])
+  @@index([status, isCurrent])
+  @@index([deletedAt])
+}
+
+model UsinaAnnualDepreciationAudit {
+  id             String                  @id @default(uuid())
+  depreciationId String
+  action         String
+  note           String?
+  snapshot       Json?
+  actorId        String?
+  createdAt      DateTime                @default(now())
+  depreciation   UsinaAnnualDepreciation @relation(fields: [depreciationId], references: [id], onDelete: Restrict)
+
+  @@index([depreciationId, createdAt])
+  @@index([actorId])
+}
+
+model UsinaMonthlyResultTarget {
+  id            String                          @id @default(uuid())
+  companyId     String
+  unitId        String
+  competence    DateTime                        @db.Date
+  targetRate    Decimal?                        @db.Decimal(10, 6)
+  observation   String?
+  status        String
+  version       Int
+  isCurrent     Boolean                         @default(false)
+  changeReason  String?
+  createdAt     DateTime                        @default(now())
+  createdById   String?
+  updatedAt     DateTime                        @updatedAt
+  updatedById   String?
+  confirmedAt   DateTime?
+  confirmedById String?
+  deletedAt     DateTime?
+  deletedById   String?
+  audit         UsinaMonthlyResultTargetAudit[]
+
+  @@unique([companyId, unitId, competence, version])
+  @@index([companyId, unitId, competence])
+  @@index([status, isCurrent])
+  @@index([deletedAt])
+}
+
+model UsinaMonthlyResultTargetAudit {
+  id             String                   @id @default(uuid())
+  resultTargetId String
+  action         String
+  note           String?
+  snapshot       Json?
+  actorId        String?
+  createdAt      DateTime                 @default(now())
+  resultTarget   UsinaMonthlyResultTarget @relation(fields: [resultTargetId], references: [id], onDelete: Restrict)
+
+  @@index([resultTargetId, createdAt])
+  @@index([actorId])
+}
+
+model UsinaMonthlyStonePowderFreight {
+  id            String                                @id @default(uuid())
+  companyId     String
+  unitId        String
+  competence    DateTime                              @db.Date
+  unitCostPerM3 Decimal                               @db.Decimal(14, 6)
+  observation   String?
+  status        String
+  version       Int
+  isCurrent     Boolean                               @default(false)
+  changeReason  String?
+  createdAt     DateTime                              @default(now())
+  createdById   String?
+  updatedAt     DateTime                              @updatedAt
+  updatedById   String?
+  confirmedAt   DateTime?
+  confirmedById String?
+  deletedAt     DateTime?
+  deletedById   String?
+  audit         UsinaMonthlyStonePowderFreightAudit[]
+
+  @@unique([companyId, unitId, competence, version])
+  @@index([companyId, unitId, competence])
+  @@index([status, isCurrent])
+  @@index([deletedAt])
+}
+
+model UsinaMonthlyStonePowderFreightAudit {
+  id              String                         @id @default(uuid())
+  freightConfigId String
+  action          String
+  note            String?
+  snapshot        Json?
+  actorId         String?
+  createdAt       DateTime                       @default(now())
+  freightConfig   UsinaMonthlyStonePowderFreight @relation(fields: [freightConfigId], references: [id], onDelete: Restrict)
+
+  @@index([freightConfigId, createdAt])
+  @@index([actorId])
+}
+
+model UsinaBomStructure {
+  id                 String            @id @default(uuid())
+  companyId          String?
+  unitId             String?
+  aethosProductId    Int
+  active             Boolean           @default(true)
+  createdById        String?
+  updatedById        String?
+  inactivatedById    String?
+  inactivatedAt      DateTime?
+  inactivationReason String?
+  deletedAt          DateTime?
+  deletedById        String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  versions           UsinaBomVersion[]
+  audit              UsinaBomAudit[]
+
+  @@index([aethosProductId])
+  @@index([companyId, unitId, active])
+  @@index([deletedAt])
+}
+
+model UsinaBomVersion {
+  id                 String              @id @default(uuid())
+  structureId        String
+  version            Int
+  traceName          String
+  validFrom          DateTime            @db.Date
+  validTo            DateTime?           @db.Date
+  active             Boolean             @default(true)
+  createdById        String?
+  updatedById        String?
+  inactivatedById    String?
+  inactivatedAt      DateTime?
+  inactivationReason String?
+  deletedAt          DateTime?
+  deletedById        String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  structure          UsinaBomStructure   @relation(fields: [structureId], references: [id], onDelete: Restrict)
+  components         UsinaBomComponent[]
+
+  @@unique([structureId, version])
+  @@index([structureId, active])
+  @@index([validFrom, validTo])
+  @@index([deletedAt])
+}
+
+model UsinaBomComponent {
+  id                 String          @id @default(uuid())
+  versionId          String
+  aethosMaterialId   Int
+  materialName       String
+  consumptionPercent Decimal         @db.Decimal(12, 6)
+  sortOrder          Int
+  createdById        String?
+  updatedById        String?
+  deletedAt          DateTime?
+  deletedById        String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  version            UsinaBomVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+
+  @@unique([versionId, aethosMaterialId])
+  @@index([versionId, sortOrder])
+  @@index([aethosMaterialId])
+  @@index([deletedAt])
+}
+
+model UsinaBomAudit {
+  id          String            @id @default(uuid())
+  structureId String
+  versionId   String?
+  action      String
+  note        String?
+  snapshot    Json?
+  actorId     String?
+  createdAt   DateTime          @default(now())
+  structure   UsinaBomStructure @relation(fields: [structureId], references: [id], onDelete: Restrict)
+
+  @@index([structureId, createdAt])
+  @@index([versionId])
+  @@index([actorId])
+}
+
+model UsinaBomMissingAlert {
+  id                 String    @id @default(uuid())
+  companyId          String
+  unitId             String
+  aethosProductId    Int
+  productDescription String
+  firstSeenAt        DateTime  @default(now()) @db.Timestamptz(6)
+  lastSeenAt         DateTime  @default(now()) @db.Timestamptz(6)
+  lastSeenCompetence DateTime  @db.Date
+  status             String    @default("PENDING")
+  attempts           Int       @default(0)
+  recipientUserId    String?
+  recipientEmail     String?
+  sentAt             DateTime? @db.Timestamptz(6)
+  resolvedAt         DateTime? @db.Timestamptz(6)
+  lastError          String?
+  createdAt          DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @db.Timestamptz(6)
+
+  @@unique([companyId, unitId, aethosProductId])
+  @@index([status, sentAt])
+  @@index([resolvedAt, lastSeenAt])
+  @@index([recipientUserId])
+}
+
+model UsinaSyncRun {
+  id                               String                                 @id @default(uuid())
+  dataset                          String
+  syncRunId                        String
+  syncMode                         String
+  generatedAt                      DateTime                               @db.Timestamptz(6)
+  scopeCompanyId                   String
+  scopeUnitId                      String
+  scopeDateFrom                    DateTime                               @db.Date
+  scopeDateTo                      DateTime                               @db.Date
+  status                           String                                 @default("IN_PROGRESS")
+  receivedCount                    Int                                    @default(0)
+  acceptedCount                    Int                                    @default(0)
+  upsertedCount                    Int                                    @default(0)
+  unchangedCount                   Int                                    @default(0)
+  rejectedCount                    Int                                    @default(0)
+  deactivatedCount                 Int                                    @default(0)
+  lastBatchNumber                  Int?
+  completedAt                      DateTime?                              @db.Timestamptz(6)
+  failedAt                         DateTime?                              @db.Timestamptz(6)
+  failureReason                    String?
+  scopeMetadata                    Json?
+  createdAt                        DateTime                               @default(now())
+  updatedAt                        DateTime                               @updatedAt
+  batches                          UsinaSyncBatch[]
+  productionFacts                  UsinaProductionFact[]
+  revenueFacts                     UsinaRevenueFact[]
+  materialFacts                    UsinaMaterialReceiptFact[]
+  materialExceptions               UsinaMaterialReceiptException[]
+  operationalCosts                 UsinaOperationalCostFact[]
+  stockValuations                  UsinaMaterialStockValuation[]
+  physicalMovements                UsinaPhysicalMaterialMovement[]
+  fleetLaborAllocations            UsinaFleetMaintenanceLaborAllocation[]
+  asphaltFleetFreights             UsinaAsphaltFleetFreightFact[]
+  asphaltEquipmentHours            UsinaAsphaltEquipmentHourFact[]
+  costPurchaseExpenses             CostPurchaseVehicleExpenseFact[]       @relation("CostPurchaseExpenseLastSeenRun")
+  costPurchaseFuel                 CostPurchaseVehicleFuelFact[]          @relation("CostPurchaseFuelLastSeenRun")
+  costPurchaseManagerialEntries    CostPurchaseManagerialEntryFact[]      @relation("CostPurchaseManagerialEntryLastSeenRun")
+  costPurchaseInternalConsumptions CostPurchaseInternalConsumptionFact[]  @relation("CostPurchaseInternalConsumptionLastSeenRun")
+  costPurchasePreventiveOrders     CostPurchasePreventiveOrderFact[]      @relation("CostPurchasePreventiveOrderLastSeenRun")
+
+  @@unique([dataset, syncRunId])
+  @@index([dataset, status, generatedAt])
+  @@index([scopeCompanyId, scopeUnitId, scopeDateFrom, scopeDateTo])
+}
+
+model UsinaSyncBatch {
+  id               String       @id @default(uuid())
+  runId            String
+  batchNumber      Int
+  payloadHash      String
+  receivedCount    Int
+  acceptedCount    Int
+  upsertedCount    Int
+  unchangedCount   Int
+  rejectedCount    Int
+  deactivatedCount Int
+  response         Json
+  processedAt      DateTime     @default(now()) @db.Timestamptz(6)
+  run              UsinaSyncRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+
+  @@unique([runId, batchNumber])
+  @@index([payloadHash])
+  @@index([processedAt])
+}
+
+model CostPurchaseVehicleExpenseFact {
+  id                 String                                @id @default(uuid())
+  companyId          String
+  unitId             String
+  dataset            String
+  source             String
+  sourceRecordId     String
+  competence         DateTime                              @db.Date
+  aethosVehicleId    Int
+  documentDate       DateTime?                             @db.Date
+  documentNumber     String?
+  amount             Decimal                               @db.Decimal(24, 12)
+  desiredAverage     Decimal?                              @db.Decimal(24, 12)
+  contentHash        String
+  raw                Json?
+  active             Boolean                               @default(true)
+  deactivatedAt      DateTime?                             @db.Timestamptz(6)
+  deactivationReason String?
+  lastSeenRunId      String?
+  syncedAt           DateTime                              @default(now()) @db.Timestamptz(6)
+  createdAt          DateTime                              @default(now())
+  updatedAt          DateTime                              @updatedAt
+  lastSeenRun        UsinaSyncRun?                         @relation("CostPurchaseExpenseLastSeenRun", fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+  audits             CostPurchaseVehicleExpenseFactAudit[]
+
+  @@unique([source, companyId, unitId, dataset, sourceRecordId])
+  @@index([companyId, unitId, dataset, competence, active])
+  @@index([aethosVehicleId, competence, active])
+  @@index([lastSeenRunId])
+}
+
+model CostPurchaseVehicleExpenseFactAudit {
+  id         BigInt                         @id @default(autoincrement())
+  factId     String
+  operation  String
+  syncRunId  String
+  beforeData Json?
+  afterData  Json?
+  changedAt  DateTime                       @default(now()) @db.Timestamptz(6)
+  fact       CostPurchaseVehicleExpenseFact @relation(fields: [factId], references: [id], onDelete: Restrict)
+
+  @@index([factId, changedAt])
+  @@index([syncRunId])
+}
+
+model CostPurchaseVehicleFuelFact {
+  id                 String                             @id @default(uuid())
+  companyId          String
+  unitId             String
+  dataset            String
+  source             String
+  sourceRecordId     String
+  competence         DateTime                           @db.Date
+  aethosVehicleId    Int
+  documentDate       DateTime?                          @db.Date
+  fuelAmount         Decimal                            @db.Decimal(24, 12)
+  liters             Decimal                            @db.Decimal(24, 12)
+  initialKm          Decimal?                           @db.Decimal(24, 12)
+  currentKm          Decimal?                           @db.Decimal(24, 12)
+  usesHourMeter      Boolean?
+  sourceAverage      Decimal?                           @db.Decimal(24, 12)
+  desiredAverage     Decimal?                           @db.Decimal(24, 12)
+  planAccountId      Int?
+  contentHash        String
+  raw                Json?
+  active             Boolean                            @default(true)
+  deactivatedAt      DateTime?                          @db.Timestamptz(6)
+  deactivationReason String?
+  lastSeenRunId      String?
+  syncedAt           DateTime                           @default(now()) @db.Timestamptz(6)
+  createdAt          DateTime                           @default(now())
+  updatedAt          DateTime                           @updatedAt
+  lastSeenRun        UsinaSyncRun?                      @relation("CostPurchaseFuelLastSeenRun", fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+  audits             CostPurchaseVehicleFuelFactAudit[]
+
+  @@unique([source, companyId, unitId, dataset, sourceRecordId])
+  @@index([companyId, unitId, dataset, competence, active])
+  @@index([aethosVehicleId, competence, active])
+  @@index([planAccountId, competence, active])
+  @@index([lastSeenRunId])
+}
+
+model CostPurchaseVehicleFuelFactAudit {
+  id         BigInt                      @id @default(autoincrement())
+  factId     String
+  operation  String
+  syncRunId  String
+  beforeData Json?
+  afterData  Json?
+  changedAt  DateTime                    @default(now()) @db.Timestamptz(6)
+  fact       CostPurchaseVehicleFuelFact @relation(fields: [factId], references: [id], onDelete: Restrict)
+
+  @@index([factId, changedAt])
+  @@index([syncRunId])
+}
+
+model CostPurchaseReportException {
+  id                  String                             @id @default(uuid())
+  identifierType      String
+  identifierValue     String
+  displayFleet        String?
+  displayModel        String?
+  displayType         String?
+  includeInReport     Boolean                            @default(true)
+  includeInAllocation Boolean                            @default(true)
+  rateGroup           String?
+  reason              String
+  validFrom           DateTime                           @db.Date
+  validTo             DateTime?                          @db.Date
+  active              Boolean                            @default(true)
+  deletedAt           DateTime?                          @db.Timestamptz(6)
+  createdBy           String?
+  updatedBy           String?
+  createdAt           DateTime                           @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime                           @updatedAt @db.Timestamptz(6)
+  audits              CostPurchaseReportExceptionAudit[]
+
+  @@unique([identifierType, identifierValue, validFrom])
+  @@index([identifierType, identifierValue, active])
+  @@index([validFrom, validTo, active])
+}
+
+model CostPurchaseReportExceptionAudit {
+  id          BigInt                      @id @default(autoincrement())
+  exceptionId String
+  operation   String
+  beforeData  Json?
+  afterData   Json?
+  actorId     String?
+  changedAt   DateTime                    @default(now()) @db.Timestamptz(6)
+  exception   CostPurchaseReportException @relation(fields: [exceptionId], references: [id], onDelete: Restrict)
+
+  @@index([exceptionId, changedAt])
+}
+
+model CostPurchaseAllocationPolicy {
+  id                      String                              @id @default(uuid())
+  validFrom               DateTime                            @db.Date
+  validTo                 DateTime?                           @db.Date
+  vehicleShare            Decimal                             @db.Decimal(10, 6)
+  truckShare              Decimal                             @db.Decimal(10, 6)
+  machineShare            Decimal                             @db.Decimal(10, 6)
+  maintenanceVehicleFixed Decimal                             @db.Decimal(24, 12)
+  comboioPlateFixed       Decimal                             @db.Decimal(24, 12)
+  vehicleKeywords         String[]
+  truckKeywords           String[]
+  sourceNote              String
+  active                  Boolean                             @default(true)
+  createdBy               String?
+  updatedBy               String?
+  createdAt               DateTime                            @default(now()) @db.Timestamptz(6)
+  updatedAt               DateTime                            @updatedAt @db.Timestamptz(6)
+  audits                  CostPurchaseAllocationPolicyAudit[]
+
+  @@index([validFrom, validTo, active])
+}
+
+model CostPurchaseAllocationPolicyAudit {
+  id         BigInt                       @id @default(autoincrement())
+  policyId   String
+  operation  String
+  beforeData Json?
+  afterData  Json?
+  actorId    String?
+  changedAt  DateTime                     @default(now()) @db.Timestamptz(6)
+  policy     CostPurchaseAllocationPolicy @relation(fields: [policyId], references: [id], onDelete: Restrict)
+
+  @@index([policyId, changedAt])
+}
+
+model CostPurchaseManagerialEntryFact {
+  id                 String                                 @id @default(uuid())
+  companyId          String
+  unitId             String
+  dataset            String
+  source             String
+  sourceRecordId     String
+  sourceHeaderId     String
+  sourceItemId       String
+  documentDate       DateTime                               @db.Date
+  competence         DateTime                               @db.Date
+  documentNumber     String?
+  sourceStatus       String
+  aethosItemId       Int
+  unit               String?
+  quantity           Decimal?                               @db.Decimal(24, 12)
+  totalValue         Decimal                                @db.Decimal(24, 12)
+  contentHash        String
+  raw                Json?
+  active             Boolean                                @default(true)
+  deactivatedAt      DateTime?                              @db.Timestamptz(6)
+  deactivationReason String?
+  lastSeenRunId      String?
+  syncedAt           DateTime                               @default(now()) @db.Timestamptz(6)
+  createdAt          DateTime                               @default(now())
+  updatedAt          DateTime                               @updatedAt
+  lastSeenRun        UsinaSyncRun?                          @relation("CostPurchaseManagerialEntryLastSeenRun", fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+  audits             CostPurchaseManagerialEntryFactAudit[]
+
+  @@unique([source, companyId, unitId, dataset, sourceRecordId])
+  @@index([companyId, unitId, dataset, competence, active])
+  @@index([aethosItemId, competence, active])
+  @@index([lastSeenRunId])
+}
+
+model CostPurchaseManagerialEntryFactAudit {
+  id         BigInt                          @id @default(autoincrement())
+  factId     String
+  operation  String
+  syncRunId  String
+  beforeData Json?
+  afterData  Json?
+  changedAt  DateTime                        @default(now()) @db.Timestamptz(6)
+  fact       CostPurchaseManagerialEntryFact @relation(fields: [factId], references: [id], onDelete: Restrict)
+
+  @@index([factId, changedAt])
+  @@index([syncRunId])
+}
+
+model CostPurchaseInternalConsumptionFact {
+  id                 String                                     @id @default(uuid())
+  companyId          String
+  unitId             String
+  dataset            String
+  source             String
+  sourceRecordId     String
+  sourceHeaderId     String
+  sourceItemId       String
+  documentDate       DateTime                                   @db.Date
+  competence         DateTime                                   @db.Date
+  documentNumber     String?
+  planAccountId      Int
+  categoryId         Int
+  aethosItemId       Int
+  aethosVehicleId    Int?
+  assetCode          String?
+  quantity           Decimal?                                   @db.Decimal(24, 12)
+  unit               String?
+  amount             Decimal                                    @db.Decimal(24, 12)
+  sourceUpdatedAt    DateTime?                                  @db.Timestamptz(6)
+  sourceContentHash  String
+  contentHash        String
+  raw                Json?
+  active             Boolean                                    @default(true)
+  deactivatedAt      DateTime?                                  @db.Timestamptz(6)
+  deactivationReason String?
+  lastSeenRunId      String?
+  syncedAt           DateTime                                   @default(now()) @db.Timestamptz(6)
+  createdAt          DateTime                                   @default(now())
+  updatedAt          DateTime                                   @updatedAt
+  lastSeenRun        UsinaSyncRun?                              @relation("CostPurchaseInternalConsumptionLastSeenRun", fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+  audits             CostPurchaseInternalConsumptionFactAudit[]
+
+  @@unique([source, companyId, unitId, dataset, sourceRecordId], map: "cp_internal_source_record_key")
+  @@unique([source, companyId, unitId, dataset, sourceHeaderId, sourceItemId], map: "cp_internal_header_item_key")
+  @@index([companyId, unitId, dataset, competence, active])
+  @@index([planAccountId, categoryId, competence, active])
+  @@index([aethosItemId, competence, active])
+  @@index([lastSeenRunId])
+}
+
+model CostPurchaseInternalConsumptionFactAudit {
+  id         BigInt                              @id @default(autoincrement())
+  factId     String
+  operation  String
+  syncRunId  String
+  beforeData Json?
+  afterData  Json?
+  changedAt  DateTime                            @default(now()) @db.Timestamptz(6)
+  fact       CostPurchaseInternalConsumptionFact @relation(fields: [factId], references: [id], onDelete: Restrict)
+
+  @@index([factId, changedAt])
+  @@index([syncRunId])
+}
+
+model CostPurchasePreventiveOrderFact {
+  id                 String                                 @id @default(uuid())
+  companyId          String
+  unitId             String
+  dataset            String
+  source             String
+  sourceRecordId     String
+  orderId            String
+  documentDate       DateTime                               @db.Date
+  competence         DateTime                               @db.Date
+  documentNumber     String?
+  aethosVehicleId    Int?
+  assetCode          String?
+  amount             Decimal                                @db.Decimal(24, 12)
+  preventiveLinkIds  Json
+  sourceUpdatedAt    DateTime?                              @db.Timestamptz(6)
+  sourceContentHash  String
+  contentHash        String
+  raw                Json?
+  active             Boolean                                @default(true)
+  deactivatedAt      DateTime?                              @db.Timestamptz(6)
+  deactivationReason String?
+  lastSeenRunId      String?
+  syncedAt           DateTime                               @default(now()) @db.Timestamptz(6)
+  createdAt          DateTime                               @default(now())
+  updatedAt          DateTime                               @updatedAt
+  lastSeenRun        UsinaSyncRun?                          @relation("CostPurchasePreventiveOrderLastSeenRun", fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+  audits             CostPurchasePreventiveOrderFactAudit[]
+
+  @@unique([source, companyId, unitId, dataset, sourceRecordId], map: "cp_preventive_source_record_key")
+  @@unique([source, companyId, unitId, dataset, orderId], map: "cp_preventive_order_key")
+  @@index([companyId, unitId, dataset, competence, active])
+  @@index([aethosVehicleId, competence, active])
+  @@index([lastSeenRunId])
+}
+
+model CostPurchasePreventiveOrderFactAudit {
+  id         BigInt                          @id @default(autoincrement())
+  factId     String
+  operation  String
+  syncRunId  String
+  beforeData Json?
+  afterData  Json?
+  changedAt  DateTime                        @default(now()) @db.Timestamptz(6)
+  fact       CostPurchasePreventiveOrderFact @relation(fields: [factId], references: [id], onDelete: Restrict)
+
+  @@index([factId, changedAt])
+  @@index([syncRunId])
+}
+
+model CostPurchaseCompetenceBenchmark {
+  id              BigInt   @id @default(autoincrement())
+  competence      DateTime @db.Date
+  lineNumber      Int
+  value           Decimal  @db.Decimal(24, 12)
+  kind            String
+  referenceStatus String
+  sourceReference String
+  note            String?
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([competence, lineNumber])
+  @@index([competence])
+}
+
+model CostPurchaseManagerialItemMapping {
+  id           String                                   @id @default(uuid())
+  aethosItemId Int
+  category     String
+  validFrom    DateTime                                 @db.Date
+  validTo      DateTime?                                @db.Date
+  reason       String
+  active       Boolean                                  @default(true)
+  deletedAt    DateTime?                                @db.Timestamptz(6)
+  createdBy    String?
+  updatedBy    String?
+  createdAt    DateTime                                 @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime                                 @updatedAt @db.Timestamptz(6)
+  audits       CostPurchaseManagerialItemMappingAudit[]
+
+  @@unique([aethosItemId, validFrom])
+  @@index([category, validFrom, validTo, active])
+  @@index([aethosItemId, active])
+}
+
+model CostPurchaseManagerialItemMappingAudit {
+  id         BigInt                            @id @default(autoincrement())
+  mappingId  String
+  operation  String
+  beforeData Json?
+  afterData  Json?
+  actorId    String?
+  changedAt  DateTime                          @default(now()) @db.Timestamptz(6)
+  mapping    CostPurchaseManagerialItemMapping @relation(fields: [mappingId], references: [id], onDelete: Restrict)
+
+  @@index([mappingId, changedAt])
+}
+
+model CostPurchaseManagerialQuarantine {
+  id             String                                  @id @default(uuid())
+  source         String
+  companyId      String
+  unitId         String
+  dataset        String
+  sourceRecordId String
+  competence     DateTime?                               @db.Date
+  reasonCode     String
+  reasonDetail   String?
+  payloadHash    String
+  raw            Json?
+  active         Boolean                                 @default(true)
+  resolvedAt     DateTime?                               @db.Timestamptz(6)
+  resolvedBy     String?
+  syncRunId      String
+  createdAt      DateTime                                @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime                                @updatedAt @db.Timestamptz(6)
+  audits         CostPurchaseManagerialQuarantineAudit[]
+
+  @@unique([source, companyId, unitId, dataset, sourceRecordId])
+  @@index([dataset, competence, active])
+  @@index([reasonCode, active])
+}
+
+model CostPurchaseManagerialQuarantineAudit {
+  id           BigInt                           @id @default(autoincrement())
+  quarantineId String
+  operation    String
+  syncRunId    String
+  beforeData   Json?
+  afterData    Json?
+  changedAt    DateTime                         @default(now()) @db.Timestamptz(6)
+  quarantine   CostPurchaseManagerialQuarantine @relation(fields: [quarantineId], references: [id], onDelete: Restrict)
+
+  @@index([quarantineId, changedAt])
+  @@index([syncRunId])
+}
+
+model UsinaProductionFact {
+  id                    String        @id @default(uuid())
+  companyId             String
+  unitId                String
+  source                String
+  sourceRecordId        String
+  weighingId            String
+  aethosProductId       Int
+  productDescription    String
+  classification        String
+  occurredAt            DateTime      @db.Timestamptz(6)
+  occurredDate          DateTime      @db.Date
+  competence            DateTime      @db.Date
+  quantityTon           Decimal       @db.Decimal(18, 6)
+  aethosCompanyId       Int
+  originFlag            String?
+  personId              Int?
+  entryExitFlag         String?
+  weighingVehicleStatus String
+  weighingStatus        String
+  tareTon               Decimal?      @db.Decimal(18, 6)
+  firstWeighingAt       DateTime?     @db.Timestamptz(6)
+  secondWeighingAt      DateTime?     @db.Timestamptz(6)
+  sourceUpdatedAt       DateTime?     @db.Timestamptz(6)
+  contentHash           String
+  raw                   Json?
+  active                Boolean       @default(true)
+  deactivatedAt         DateTime?     @db.Timestamptz(6)
+  deactivationReason    String?
+  lastSeenRunId         String?
+  syncedAt              DateTime      @default(now()) @db.Timestamptz(6)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  lastSeenRun           UsinaSyncRun? @relation(fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+
+  @@unique([source, sourceRecordId])
+  @@index([companyId, unitId, competence, active])
+  @@index([aethosProductId, competence])
+  @@index([classification, competence])
+  @@index([aethosCompanyId])
+  @@index([lastSeenRunId])
+  @@index([syncedAt])
+}
+
+model UsinaAsphaltTeam {
+  id               String                            @id @default(uuid())
+  companyId        String
+  unitId           String
+  validFrom        DateTime                          @db.Date
+  validTo          DateTime?                         @db.Date
+  createdById      String?
+  updatedById      String?
+  deletedAt        DateTime?                         @db.Timestamptz(6)
+  deletedById      String?
+  createdAt        DateTime                          @default(now())
+  updatedAt        DateTime                          @updatedAt
+  versions         UsinaAsphaltTeamVersion[]
+  assignments      UsinaAsphaltTeamItemAssignment[]
+  fleetAssignments UsinaAsphaltTeamFleetAssignment[]
+  audit            UsinaAsphaltTeamAudit[]
+
+  @@index([companyId, unitId, validFrom, validTo])
+  @@index([deletedAt])
+}
+
+model UsinaAsphaltTeamVersion {
+  id              String           @id @default(uuid())
+  teamId          String
+  companyId       String
+  unitId          String
+  version         Int
+  businessCode    String
+  displayName     String
+  responsibleName String?
+  validFrom       DateTime         @db.Date
+  validTo         DateTime?        @db.Date
+  changeReason    String?
+  createdById     String?
+  updatedById     String?
+  deletedAt       DateTime?        @db.Timestamptz(6)
+  deletedById     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  team            UsinaAsphaltTeam @relation(fields: [teamId], references: [id], onDelete: Restrict)
+
+  @@unique([teamId, version])
+  @@index([companyId, unitId, businessCode, validFrom, validTo])
+  @@index([teamId, validFrom, validTo])
+  @@index([deletedAt])
+}
+
+model UsinaAsphaltTeamItemAssignment {
+  id              String           @id @default(uuid())
+  teamId          String
+  companyId       String
+  unitId          String
+  aethosProductId Int
+  version         Int
+  validFrom       DateTime         @db.Date
+  validTo         DateTime?        @db.Date
+  changeReason    String?
+  createdById     String?
+  updatedById     String?
+  deletedAt       DateTime?        @db.Timestamptz(6)
+  deletedById     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  team            UsinaAsphaltTeam @relation(fields: [teamId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, unitId, aethosProductId, version])
+  @@index([companyId, unitId, aethosProductId, validFrom, validTo])
+  @@index([teamId, validFrom, validTo])
+  @@index([deletedAt])
+}
+
+model UsinaAsphaltTeamAudit {
+  id         String            @id @default(uuid())
+  teamId     String?
+  entityType String
+  entityId   String
+  action     String
+  note       String?
+  before     Json?
+  after      Json?
+  actorId    String?
+  createdAt  DateTime          @default(now()) @db.Timestamptz(6)
+  team       UsinaAsphaltTeam? @relation(fields: [teamId], references: [id], onDelete: Restrict)
+
+  @@index([teamId, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId])
+}
+
+model UsinaAsphaltTeamFleetAssignment {
+  id                  String                                @id @default(uuid())
+  companyId           String
+  unitId              String
+  competence          DateTime                              @db.Date
+  teamId              String
+  aethosVehicleId     Int
+  fleetNumber         String?
+  plate               String?
+  category            String
+  validFrom           DateTime                              @db.Date
+  validTo             DateTime                              @db.Date
+  origin              String                                @default("JR_MANUAL")
+  observation         String?
+  createdById         String?
+  updatedById         String?
+  deletedAt           DateTime?                             @db.Timestamptz(6)
+  deletedById         String?
+  createdAt           DateTime                              @default(now())
+  updatedAt           DateTime                              @updatedAt
+  team                UsinaAsphaltTeam                      @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  operatorAssignments UsinaAsphaltFleetOperatorAssignment[]
+
+  @@index([companyId, unitId, competence, teamId])
+  @@index([aethosVehicleId, validFrom, validTo])
+  @@index([category, competence])
+  @@index([deletedAt])
+}
+
+model TotvsEmployeeSyncRun {
+  id                String                       @id @default(uuid())
+  companyId         String
+  unitId            String
+  queryCode         String
+  contextCode       String
+  status            String
+  requestedById     String?
+  startedAt         DateTime                     @default(now()) @db.Timestamptz(6)
+  finishedAt        DateTime?                    @db.Timestamptz(6)
+  receivedRows      Int                          @default(0)
+  acceptedRows      Int                          @default(0)
+  rejectedRows      Int                          @default(0)
+  employeeCount     Int                          @default(0)
+  aggregateCount    Int                          @default(0)
+  responseBytes     Int                          @default(0)
+  replayed          Boolean                      @default(false)
+  errorCode         String?
+  errorDetail       String?
+  createdAt         DateTime                     @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime                     @updatedAt @db.Timestamptz(6)
+  employeeSnapshots TotvsEmployeeSnapshot[]
+  costAggregates    TotvsEmployeeCostAggregate[]
+
+  @@index([companyId, unitId, startedAt])
+  @@index([queryCode, status, startedAt])
+}
+
+model TotvsEmployeeSnapshot {
+  id               String               @id @default(uuid())
+  companyId        String
+  unitId           String
+  source           String               @default("TOTVS_RM")
+  queryCode        String               @default("IND.BI.0025")
+  companyCode      String
+  employeeNumber   String
+  employeeKey      String
+  competence       DateTime             @db.Date
+  period           Int
+  version          Int
+  isCurrent        Boolean              @default(true)
+  displayName      String
+  jobName          String?
+  departmentName   String?
+  employmentStatus String?
+  admissionDate    DateTime?            @db.Date
+  dismissalDate    DateTime?            @db.Date
+  contentHash      String
+  syncRunId        String
+  active           Boolean              @default(true)
+  deactivatedAt    DateTime?            @db.Timestamptz(6)
+  createdAt        DateTime             @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime             @updatedAt @db.Timestamptz(6)
+  syncRun          TotvsEmployeeSyncRun @relation(fields: [syncRunId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, unitId, employeeKey, competence, period, version], map: "TotvsEmployeeSnapshot_scope_version_key")
+  @@index([companyId, unitId, competence, isCurrent, active], map: "TotvsEmployeeSnapshot_current_idx")
+  @@index([employeeKey, competence, period])
+  @@index([syncRunId])
+}
+
+model TotvsEmployeeCostAggregate {
+  id                   String               @id @default(uuid())
+  companyId            String
+  unitId               String
+  source               String               @default("TOTVS_RM")
+  queryCode            String               @default("IND.BI.0025")
+  companyCode          String
+  employeeNumber       String
+  employeeKey          String
+  competence           DateTime             @db.Date
+  period               Int
+  version              Int
+  isCurrent            Boolean              @default(true)
+  sourceRows           Int
+  allocationRows       Int?
+  fixedAllocationValue Decimal?             @db.Decimal(18, 6)
+  totalGeneralLine     Decimal?             @db.Decimal(18, 6)
+  allocationClosed     Boolean              @default(false)
+  officialCostEligible Boolean              @default(false)
+  pendingReason        String?
+  contentHash          String
+  syncRunId            String
+  active               Boolean              @default(true)
+  deactivatedAt        DateTime?            @db.Timestamptz(6)
+  createdAt            DateTime             @default(now()) @db.Timestamptz(6)
+  updatedAt            DateTime             @updatedAt @db.Timestamptz(6)
+  syncRun              TotvsEmployeeSyncRun @relation(fields: [syncRunId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, unitId, employeeKey, competence, period, version], map: "TotvsEmployeeCostAggregate_scope_version_key")
+  @@index([companyId, unitId, competence, isCurrent, active], map: "TotvsEmployeeCostAggregate_current_idx")
+  @@index([employeeKey, competence, period])
+  @@index([syncRunId])
+}
+
+model UsinaAsphaltFleetOperatorAssignment {
+  id                  String                          @id @default(uuid())
+  fleetAssignmentId   String
+  companyId           String
+  unitId              String
+  employeeKey         String
+  employeeDisplayName String
+  validFrom           DateTime                        @db.Date
+  validTo             DateTime                        @db.Date
+  origin              String                          @default("TOTVS_IND_BI_0025")
+  observation         String?
+  createdById         String?
+  updatedById         String?
+  deletedAt           DateTime?                       @db.Timestamptz(6)
+  deletedById         String?
+  createdAt           DateTime                        @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime                        @updatedAt @db.Timestamptz(6)
+  fleetAssignment     UsinaAsphaltTeamFleetAssignment @relation(fields: [fleetAssignmentId], references: [id], onDelete: Restrict)
+
+  @@index([fleetAssignmentId, validFrom, validTo], map: "UsinaAsphaltFleetOperatorAssignment_fleet_period_idx")
+  @@index([companyId, unitId, employeeKey, validFrom, validTo], map: "UsinaAsphaltFleetOperatorAssignment_employee_period_idx")
+  @@index([deletedAt])
+}
+
+model UsinaAsphaltEquipmentHourlyRate {
+  id               String                                 @id @default(uuid())
+  companyId        String
+  unitId           String
+  competence       DateTime                               @db.Date
+  category         String
+  version          Int
+  productiveRate   Decimal                                @db.Decimal(18, 6)
+  unproductiveRate Decimal                                @db.Decimal(18, 6)
+  isCurrent        Boolean                                @default(true)
+  changeReason     String
+  createdById      String?
+  updatedById      String?
+  deletedAt        DateTime?                              @db.Timestamptz(6)
+  deletedById      String?
+  createdAt        DateTime                               @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime                               @updatedAt @db.Timestamptz(6)
+  audits           UsinaAsphaltEquipmentHourlyRateAudit[]
+
+  @@unique([companyId, unitId, competence, category, version], map: "UsinaAsphaltEquipmentHourlyRate_scope_version_key")
+  @@index([companyId, unitId, competence, category, isCurrent], map: "UsinaAsphaltEquipmentHourlyRate_scope_current_idx")
+  @@index([deletedAt], map: "UsinaAsphaltEquipmentHourlyRate_deletedAt_idx")
+}
+
+model UsinaAsphaltEquipmentHourlyRateAudit {
+  id         BigInt                          @id @default(autoincrement())
+  rateId     String
+  action     String
+  reason     String
+  beforeData Json?
+  afterData  Json?
+  actorId    String?
+  createdAt  DateTime                        @default(now()) @db.Timestamptz(6)
+  rate       UsinaAsphaltEquipmentHourlyRate @relation(fields: [rateId], references: [id], onDelete: Restrict)
+
+  @@index([rateId, createdAt], map: "UsinaAsphaltEquipmentHourlyRateAudit_rate_created_idx")
+  @@index([actorId, createdAt], map: "UsinaAsphaltEquipmentHourlyRateAudit_actor_created_idx")
+}
+
+model UsinaAsphaltFleetFreightFact {
+  id                     String                              @id @default(uuid())
+  companyId              String
+  unitId                 String
+  source                 String
+  dataset                String
+  sourceRecordId         String
+  sourceKind             String
+  sourceDocumentId       String
+  sourceInstallmentId    String?
+  occurredAt             DateTime                            @db.Timestamptz(6)
+  occurredDate           DateTime                            @db.Date
+  competence             DateTime                            @db.Date
+  aethosVehicleId        Int
+  fleetNumber            String?
+  plate                  String?
+  freightTypeId          Int
+  principalItemId        Int?
+  freightTypeDescription String?
+  quantity               Decimal?                            @db.Decimal(18, 6)
+  unit                   String?
+  amount                 Decimal                             @db.Decimal(18, 6)
+  sourceStatus           String
+  sourceUpdatedAt        DateTime?                           @db.Timestamptz(6)
+  contentHash            String
+  raw                    Json?
+  active                 Boolean                             @default(true)
+  deactivatedAt          DateTime?                           @db.Timestamptz(6)
+  deactivationReason     String?
+  lastSeenRunId          String?
+  syncedAt               DateTime                            @default(now()) @db.Timestamptz(6)
+  createdAt              DateTime                            @default(now())
+  updatedAt              DateTime                            @updatedAt
+  lastSeenRun            UsinaSyncRun?                       @relation(fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+  audits                 UsinaAsphaltFleetFreightFactAudit[]
+
+  @@unique([source, dataset, sourceRecordId])
+  @@index([companyId, unitId, competence, active])
+  @@index([aethosVehicleId, occurredDate, active])
+  @@index([freightTypeId, competence])
+  @@index([sourceDocumentId, sourceInstallmentId])
+  @@index([lastSeenRunId])
+}
+
+model UsinaAsphaltFleetFreightFactAudit {
+  id         BigInt                       @id @default(autoincrement())
+  factId     String
+  operation  String
+  syncRunId  String
+  beforeData Json?
+  afterData  Json?
+  changedAt  DateTime                     @default(now()) @db.Timestamptz(6)
+  fact       UsinaAsphaltFleetFreightFact @relation(fields: [factId], references: [id], onDelete: Restrict)
+
+  @@index([factId, changedAt])
+  @@index([syncRunId])
+}
+
+model UsinaAsphaltEquipmentHourFact {
+  id                   String                               @id @default(uuid())
+  companyId            String
+  unitId               String
+  source               String
+  dataset              String
+  sourceRecordId       String
+  sourceBranch         String
+  sourceCompanyId      Int
+  sourceDocumentId     String
+  sourceLineId         String?
+  documentDate         DateTime?                            @db.Date
+  sourceDate           DateTime?                            @db.Date
+  competence           DateTime?                            @db.Date
+  aethosVehicleId      Int?
+  fleetNumber          String?
+  plate                String?
+  category             String
+  hourType             String
+  classifierKind       String
+  classifierId         Int
+  quantityHours        Decimal                              @db.Decimal(18, 6)
+  sourceAmount         Decimal?                             @db.Decimal(18, 6)
+  sourceStatus         String
+  cancelReasonPresent  Boolean                              @default(false)
+  cancelReason         String?
+  classificationStatus String
+  sourceCreatedAt      DateTime?                            @db.Timestamptz(6)
+  sourceUpdatedAt      DateTime?                            @db.Timestamptz(6)
+  contentHash          String
+  raw                  Json?
+  active               Boolean                              @default(true)
+  deactivatedAt        DateTime?                            @db.Timestamptz(6)
+  deactivationReason   String?
+  lastSeenRunId        String?
+  syncedAt             DateTime                             @default(now()) @db.Timestamptz(6)
+  createdAt            DateTime                             @default(now()) @db.Timestamptz(6)
+  updatedAt            DateTime                             @updatedAt @db.Timestamptz(6)
+  lastSeenRun          UsinaSyncRun?                        @relation(fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+  audits               UsinaAsphaltEquipmentHourFactAudit[]
+
+  @@unique([source, dataset, sourceRecordId])
+  @@index([companyId, unitId, competence, active])
+  @@index([aethosVehicleId, sourceDate, category, active])
+  @@index([category, hourType, competence, active])
+  @@index([classificationStatus, active])
+  @@index([sourceDocumentId, sourceLineId])
+  @@index([documentDate])
+  @@index([lastSeenRunId])
+}
+
+model UsinaAsphaltEquipmentHourFactAudit {
+  id         BigInt                        @id @default(autoincrement())
+  factId     String
+  operation  String
+  syncRunId  String
+  beforeData Json?
+  afterData  Json?
+  changedAt  DateTime                      @default(now()) @db.Timestamptz(6)
+  fact       UsinaAsphaltEquipmentHourFact @relation(fields: [factId], references: [id], onDelete: Restrict)
+
+  @@index([factId, changedAt])
+  @@index([syncRunId])
+}
+
+model UsinaRevenueFact {
+  id                    String        @id @default(uuid())
+  companyId             String
+  unitId                String
+  source                String
+  revenueType           String
+  sourceRecordId        String
+  sourceOrderId         String?
+  sourceDocumentId      String
+  sourceItemId          String
+  sourceLineId          String?
+  aethosProductId       Int
+  productDescription    String
+  classification        String
+  occurredAt            DateTime      @db.Timestamptz(6)
+  occurredDate          DateTime      @db.Date
+  competence            DateTime      @db.Date
+  quantityOriginal      Decimal       @db.Decimal(18, 6)
+  quantityUnit          String
+  quantityTon           Decimal?      @db.Decimal(18, 6)
+  amount                Decimal       @db.Decimal(18, 6)
+  freightAmount         Decimal?      @db.Decimal(18, 6)
+  orderFreightAmount    Decimal?      @db.Decimal(18, 6)
+  historicalUnitCost    Decimal?      @db.Decimal(18, 6)
+  aethosCompanyId       Int?
+  originFlag            String?
+  personId              Int?
+  entryExitFlag         String?
+  weighingVehicleStatus String?
+  weighingStatus        String?
+  tareTon               Decimal?      @db.Decimal(18, 6)
+  sourceUpdatedAt       DateTime?     @db.Timestamptz(6)
+  contentHash           String
+  raw                   Json?
+  active                Boolean       @default(true)
+  deactivatedAt         DateTime?     @db.Timestamptz(6)
+  deactivationReason    String?
+  lastSeenRunId         String?
+  syncedAt              DateTime      @default(now()) @db.Timestamptz(6)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  lastSeenRun           UsinaSyncRun? @relation(fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+
+  @@unique([source, revenueType, sourceRecordId])
+  @@index([companyId, unitId, competence, revenueType, active])
+  @@index([aethosProductId, competence])
+  @@index([classification, competence])
+  @@index([sourceOrderId, sourceLineId])
+  @@index([sourceDocumentId, sourceItemId])
+  @@index([lastSeenRunId])
+  @@index([syncedAt])
+}
+
+model UsinaMaterialReceiptFact {
+  id                    String                          @id @default(uuid())
+  companyId             String
+  unitId                String
+  source                String
+  dataset               String
+  sourceRecordId        String
+  sourceDocumentId      String
+  sourceLineId          String?
+  sourceFreightTypeId   Int?
+  aethosMaterialId      Int
+  materialDescription   String
+  materialClass         String
+  reportingFamily       String?
+  movementType          String
+  occurredAt            DateTime                        @db.Timestamptz(6)
+  occurredDate          DateTime                        @db.Date
+  competence            DateTime                        @db.Date
+  quantityOriginal      Decimal                         @db.Decimal(18, 6)
+  quantityUnit          String
+  quantityTon           Decimal?                        @db.Decimal(18, 6)
+  materialUnitCost      Decimal?                        @db.Decimal(18, 6)
+  materialAmount        Decimal?                        @db.Decimal(18, 6)
+  freightQuantity       Decimal?                        @db.Decimal(18, 6)
+  freightUnitCost       Decimal?                        @db.Decimal(18, 6)
+  freightAmount         Decimal?                        @db.Decimal(18, 6)
+  totalAmount           Decimal?                        @db.Decimal(18, 6)
+  sourceUsedQuantity    Decimal?                        @db.Decimal(18, 6)
+  sourceBalanceQuantity Decimal?                        @db.Decimal(18, 6)
+  sourceDiscountAmount  Decimal?                        @db.Decimal(18, 6)
+  aethosCompanyId       Int?
+  supplierId            Int?
+  documentPartyId       Int?
+  physicalSourcePartyId Int?
+  sourceTicketId        String?
+  entryExitFlag         String?
+  sourceStatus          String
+  tareTon               Decimal?                        @db.Decimal(18, 6)
+  sourceUpdatedAt       DateTime?                       @db.Timestamptz(6)
+  contentHash           String
+  raw                   Json?
+  active                Boolean                         @default(true)
+  deactivatedAt         DateTime?                       @db.Timestamptz(6)
+  deactivationReason    String?
+  lastSeenRunId         String?
+  syncedAt              DateTime                        @default(now()) @db.Timestamptz(6)
+  createdAt             DateTime                        @default(now())
+  updatedAt             DateTime                        @updatedAt
+  lastSeenRun           UsinaSyncRun?                   @relation(fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+  audits                UsinaMaterialReceiptFactAudit[]
+
+  @@unique([source, dataset, sourceRecordId])
+  @@index([companyId, unitId, competence, dataset, active])
+  @@index([aethosMaterialId, competence, movementType])
+  @@index([materialClass, competence, movementType])
+  @@index([sourceDocumentId, sourceLineId])
+  @@index([sourceTicketId])
+  @@index([lastSeenRunId])
+  @@index([syncedAt])
+}
+
+model UsinaMaterialReceiptFactAudit {
+  id         BigInt                   @id @default(autoincrement())
+  factId     String
+  operation  String
+  syncRunId  String
+  beforeData Json?
+  afterData  Json?
+  changedAt  DateTime                 @default(now()) @db.Timestamptz(6)
+  fact       UsinaMaterialReceiptFact @relation(fields: [factId], references: [id], onDelete: Restrict)
+
+  @@index([factId, changedAt])
+  @@index([syncRunId])
+}
+
+model UsinaMaterialReceiptException {
+  id                              String                               @id @default(uuid())
+  companyId                       String
+  unitId                          String
+  source                          String
+  dataset                         String
+  sourceRecordId                  String
+  sourceTicketId                  String
+  sourceVehicleWeighingId         Int
+  occurredAt                      DateTime                             @db.Timestamptz(6)
+  occurredDate                    DateTime                             @db.Date
+  competence                      DateTime                             @db.Date
+  finalizedAt                     DateTime?                            @db.Timestamptz(6)
+  plate                           String
+  sourcePartyId                   Int
+  sourcePartyName                 String
+  aethosItemId                    Int
+  itemDescription                 String
+  materialClass                   String
+  quantityOriginal                Decimal                              @db.Decimal(18, 6)
+  quantityUnit                    String
+  sourceDirection                 String?
+  reasonCode                      String
+  reason                          String
+  correlatedEntryId               BigInt?
+  correlatedEntryItemId           BigInt?
+  correlatedFreightTypeId         Int?
+  correlatedEntryQuantityOriginal Decimal?                             @db.Decimal(18, 6)
+  correlatedEntryQuantityUnit     String?
+  sourceUpdatedAt                 DateTime                             @db.Timestamptz(6)
+  contentHash                     String
+  raw                             Json?
+  active                          Boolean                              @default(true)
+  deactivatedAt                   DateTime?                            @db.Timestamptz(6)
+  deactivationReason              String?
+  lastSeenRunId                   String?
+  syncedAt                        DateTime                             @default(now()) @db.Timestamptz(6)
+  createdAt                       DateTime                             @default(now())
+  updatedAt                       DateTime                             @updatedAt
+  lastSeenRun                     UsinaSyncRun?                        @relation(fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+  audits                          UsinaMaterialReceiptExceptionAudit[]
+
+  @@unique([source, sourceRecordId])
+  @@index([companyId, unitId, competence, active])
+  @@index([sourcePartyId, aethosItemId, occurredDate, active])
+  @@index([reasonCode, competence, active])
+  @@index([lastSeenRunId])
+}
+
+model UsinaMaterialReceiptExceptionAudit {
+  id          BigInt                        @id @default(autoincrement())
+  exceptionId String
+  operation   String
+  syncRunId   String
+  beforeData  Json?
+  afterData   Json?
+  changedAt   DateTime                      @default(now()) @db.Timestamptz(6)
+  exception   UsinaMaterialReceiptException @relation(fields: [exceptionId], references: [id], onDelete: Restrict)
+
+  @@index([exceptionId, changedAt])
+  @@index([syncRunId])
+}
+
+model UsinaOperationalCostFact {
+  id                         String                          @id @default(uuid())
+  companyId                  String
+  unitId                     String
+  source                     String
+  dataset                    String
+  sourceRecordId             String
+  sourceDocumentId           String?
+  sourceDocumentType         String?
+  aethosVehicleId            Int?
+  fleetNumber                Int?
+  accountPlanId              Int?
+  accountPlanDescription     String?
+  internalConsumptionId      Int?
+  internalConsumptionItemId  Int?
+  materialEntryId            Int?
+  materialEntryItemId        Int?
+  sourceNoteNumber           String?
+  receivedDate               DateTime?                       @db.Date
+  aethosItemId               Int?
+  itemDescription            String?
+  itemCategoryId             Int?
+  itemCategoryDescription    String?
+  sourceDirection            String?
+  selectionBasis             String?
+  costClass                  String
+  occurredAt                 DateTime                        @db.Timestamptz(6)
+  occurredDate               DateTime                        @db.Date
+  competence                 DateTime                        @db.Date
+  amount                     Decimal                         @db.Decimal(18, 6)
+  quantity                   Decimal?                        @db.Decimal(18, 6)
+  quantityUnit               String?
+  quantityOriginal           Decimal?                        @db.Decimal(18, 6)
+  quantityOriginalUnit       String?
+  quantityTon                Decimal?                        @db.Decimal(18, 6)
+  unitPriceOriginal          Decimal?                        @db.Decimal(18, 6)
+  unitPriceTon               Decimal?                        @db.Decimal(18, 6)
+  sourceItemTotal            Decimal?                        @db.Decimal(18, 6)
+  quantityNormalizationBasis String?
+  priceNormalizationBasis    String?
+  competenceBasis            String?
+  aethosCompanyId            Int?
+  supplierId                 Int?
+  debitCreditFlag            String?
+  sourceStatus               String
+  limitationNote             String?
+  sourceUpdatedAt            DateTime?                       @db.Timestamptz(6)
+  contentHash                String
+  raw                        Json?
+  active                     Boolean                         @default(true)
+  deactivatedAt              DateTime?                       @db.Timestamptz(6)
+  deactivationReason         String?
+  lastSeenRunId              String?
+  syncedAt                   DateTime                        @default(now()) @db.Timestamptz(6)
+  createdAt                  DateTime                        @default(now())
+  updatedAt                  DateTime                        @updatedAt
+  lastSeenRun                UsinaSyncRun?                   @relation(fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+  audits                     UsinaOperationalCostFactAudit[]
+
+  @@unique([source, dataset, sourceRecordId])
+  @@index([companyId, unitId, competence, dataset, active])
+  @@index([costClass, competence, active])
+  @@index([sourceDocumentType, sourceDocumentId])
+  @@index([aethosVehicleId, competence])
+  @@index([accountPlanId, competence])
+  @@index([internalConsumptionId, internalConsumptionItemId])
+  @@index([materialEntryId, materialEntryItemId])
+  @@index([aethosItemId, competence])
+  @@index([itemCategoryId, competence])
+  @@index([lastSeenRunId])
+  @@index([syncedAt])
+}
+
+model UsinaOperationalCostFactAudit {
+  id         BigInt                   @id @default(autoincrement())
+  factId     String
+  operation  String
+  syncRunId  String
+  beforeData Json?
+  afterData  Json?
+  changedAt  DateTime                 @default(now()) @db.Timestamptz(6)
+  fact       UsinaOperationalCostFact @relation(fields: [factId], references: [id], onDelete: Restrict)
+
+  @@index([factId, changedAt])
+  @@index([syncRunId])
+}
+
+model UsinaMaterialStockValuation {
+  id                             String                             @id @default(uuid())
+  companyId                      String
+  unitId                         String
+  source                         String
+  aethosCompanyId                Int
+  aethosItemId                   Int
+  competence                     DateTime                           @db.Date
+  quantityUnit                   String
+  openingQuantity                Decimal                            @db.Decimal(18, 6)
+  validEntryQuantity             Decimal                            @db.Decimal(18, 6)
+  validIssueQuantity             Decimal                            @db.Decimal(18, 6)
+  cancellationAdjustmentQuantity Decimal                            @db.Decimal(18, 6)
+  netMovementQuantity            Decimal                            @db.Decimal(18, 6)
+  closingQuantity                Decimal                            @db.Decimal(18, 6)
+  openingAverageCost             Decimal?                           @db.Decimal(18, 6)
+  closingAverageCost             Decimal?                           @db.Decimal(18, 6)
+  sourceMaxMovementId            BigInt?
+  sourceUpdatedAt                DateTime?                          @db.Timestamptz(6)
+  contentHash                    String
+  raw                            Json?
+  active                         Boolean                            @default(true)
+  deactivatedAt                  DateTime?                          @db.Timestamptz(6)
+  deactivationReason             String?
+  lastSeenRunId                  String?
+  syncedAt                       DateTime                           @default(now()) @db.Timestamptz(6)
+  createdAt                      DateTime                           @default(now())
+  updatedAt                      DateTime                           @updatedAt
+  lastSeenRun                    UsinaSyncRun?                      @relation(fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+  audits                         UsinaMaterialStockValuationAudit[]
+
+  @@unique([source, aethosCompanyId, aethosItemId, competence])
+  @@index([companyId, unitId, competence, active])
+  @@index([aethosCompanyId, aethosItemId, competence, active])
+  @@index([lastSeenRunId])
+  @@index([syncedAt])
+}
+
+model UsinaMaterialStockValuationAudit {
+  id          BigInt                      @id @default(autoincrement())
+  valuationId String
+  operation   String
+  syncRunId   String
+  beforeData  Json?
+  afterData   Json?
+  changedAt   DateTime                    @default(now()) @db.Timestamptz(6)
+  valuation   UsinaMaterialStockValuation @relation(fields: [valuationId], references: [id], onDelete: Restrict)
+
+  @@index([valuationId, changedAt])
+  @@index([syncRunId])
+}
+
+model UsinaPhysicalMaterialMovement {
+  id                 String                               @id @default(uuid())
+  companyId          String
+  unitId             String
+  source             String
+  sourceRecordId     String
+  aethosCompanyId    Int
+  aethosItemId       Int
+  occurredAt         DateTime                             @db.Timestamptz(6)
+  competence         DateTime                             @db.Date
+  movementType       String
+  quantityOriginal   Decimal                              @db.Decimal(18, 6)
+  quantityUnit       String
+  densityTonPerM3    Decimal?                             @db.Decimal(18, 6)
+  quantityTon        Decimal                              @db.Decimal(18, 6)
+  sourceWeighingId   BigInt?
+  sourceItemId       BigInt?
+  sourceUpdatedAt    DateTime?                            @db.Timestamptz(6)
+  contentHash        String
+  raw                Json?
+  active             Boolean                              @default(true)
+  deactivatedAt      DateTime?                            @db.Timestamptz(6)
+  deactivationReason String?
+  lastSeenRunId      String?
+  syncedAt           DateTime                             @default(now()) @db.Timestamptz(6)
+  createdAt          DateTime                             @default(now())
+  updatedAt          DateTime                             @updatedAt
+  lastSeenRun        UsinaSyncRun?                        @relation(fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+  audits             UsinaPhysicalMaterialMovementAudit[]
+
+  @@unique([source, sourceRecordId])
+  @@index([companyId, unitId, competence, active])
+  @@index([aethosCompanyId, aethosItemId, competence, movementType, active])
+  @@index([lastSeenRunId])
+  @@index([syncedAt])
+}
+
+model UsinaPhysicalMaterialMovementAudit {
+  id         BigInt                        @id @default(autoincrement())
+  movementId String
+  operation  String
+  syncRunId  String
+  beforeData Json?
+  afterData  Json?
+  changedAt  DateTime                      @default(now()) @db.Timestamptz(6)
+  movement   UsinaPhysicalMaterialMovement @relation(fields: [movementId], references: [id], onDelete: Restrict)
+
+  @@index([movementId, changedAt])
+  @@index([syncRunId])
+}
+
+model UsinaFleetMaintenanceLaborAllocation {
+  id                      String                                      @id @default(uuid())
+  companyId               String
+  unitId                  String
+  source                  String
+  sourceRecordId          String
+  competence              DateTime                                    @db.Date
+  aethosVehicleId         Int
+  fleetNumber             Int
+  targetCostClass         String
+  vehicleExpenseAmount    Decimal                                     @db.Decimal(24, 12)
+  rateGroup               String
+  groupShare              Decimal                                     @db.Decimal(10, 6)
+  groupExpenseBase        Decimal                                     @db.Decimal(24, 12)
+  eligibleLaborPoolAmount Decimal                                     @db.Decimal(24, 12)
+  allocatedLaborAmount    Decimal                                     @db.Decimal(24, 12)
+  expectedLineAmount      Decimal                                     @db.Decimal(24, 12)
+  sourceSentence          String
+  sourceGeneratedAt       DateTime                                    @db.Timestamptz(6)
+  sourceUpdatedAt         DateTime?                                   @db.Timestamptz(6)
+  contentHash             String
+  raw                     Json?
+  active                  Boolean                                     @default(true)
+  deactivatedAt           DateTime?                                   @db.Timestamptz(6)
+  deactivationReason      String?
+  lastSeenRunId           String?
+  syncedAt                DateTime                                    @default(now()) @db.Timestamptz(6)
+  createdAt               DateTime                                    @default(now())
+  updatedAt               DateTime                                    @updatedAt
+  lastSeenRun             UsinaSyncRun?                               @relation(fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+  audits                  UsinaFleetMaintenanceLaborAllocationAudit[]
+
+  @@unique([source, sourceRecordId])
+  @@index([companyId, unitId, competence, active])
+  @@index([aethosVehicleId, competence, targetCostClass, active])
+  @@index([lastSeenRunId])
+  @@index([syncedAt])
+}
+
+model UsinaFleetMaintenanceLaborAllocationAudit {
+  id           BigInt                               @id @default(autoincrement())
+  allocationId String
+  operation    String
+  syncRunId    String
+  beforeData   Json?
+  afterData    Json?
+  changedAt    DateTime                             @default(now()) @db.Timestamptz(6)
+  allocation   UsinaFleetMaintenanceLaborAllocation @relation(fields: [allocationId], references: [id], onDelete: Restrict)
+
+  @@index([allocationId, changedAt])
+  @@index([syncRunId])
+}
+
+model SsmaLicense {
+  id                 String    @id @default(uuid())
+  company            String
+  name               String
+  category           String?
+  durationMonths     Int?
+  issuingAgency      String?
+  licenseNumber      String?
+  issueDate          DateTime?
+  expiryDate         DateTime
+  alertDaysBefore    Int       @default(30)
+  alertEmails        String[]  @default([])
+  alertSentForExpiry DateTime?
+  alertSentAt        DateTime?
+  alertLastError     String?
+  responsible        String?
+  notes              String?
+  active             Boolean   @default(true)
+  createdById        String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  createdBy User?                @relation("SsmaLicenseCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  renewals  SsmaLicenseRenewal[]
+
+  @@index([company])
+  @@index([expiryDate])
+  @@index([active, expiryDate])
+  @@index([active])
+  @@index([createdById])
+}
+
+model SsmaLicenseRenewal {
+  id             String    @id @default(uuid())
+  licenseId      String
+  status         String    @default("Planejada")
+  protocolNumber String?
+  requestedAt    DateTime?
+  expectedAt     DateTime?
+  completedAt    DateTime?
+  notes          String?
+  attachments    Json      @default("[]")
+  createdById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  license   SsmaLicense @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  createdBy User?       @relation("SsmaRenewalCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([licenseId])
+  @@index([status])
+  @@index([createdById])
+}
+
+model EnvironmentalEmissionFactor {
+  id           String    @id @default(uuid())
+  name         String
+  category     String
+  scope        Int
+  gas          String    @default("CO2e")
+  factorValue  Decimal   @db.Decimal(20, 10)
+  activityUnit String
+  emissionUnit String    @default("kgCO2e")
+  source       String
+  version      String?
+  validFrom    DateTime?
+  validTo      DateTime?
+  active       Boolean   @default(true)
+  createdById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  createdBy User?                 @relation("EnvironmentalFactorCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  records   EnvironmentalRecord[]
+
+  @@index([active, category])
+  @@index([scope])
+  @@index([createdById])
+}
+
+model EnvironmentalRecord {
+  id          String    @id @default(uuid())
+  domain      String
+  metric      String
+  company     String    @default("JR_CONSTRUCOES")
+  competence  DateTime
+  recordedAt  DateTime?
+  site        String?
+  asset       String?
+  amount      Decimal   @db.Decimal(20, 6)
+  unit        String
+  co2eKg      Decimal?  @db.Decimal(20, 6)
+  factorId    String?
+  status      String    @default("VALID")
+  details     Json      @default("{}")
+  attachments Json      @default("[]")
+  source      String    @default("MANUAL")
+  externalKey String?   @unique
+  notes       String?
+  active      Boolean   @default(true)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  factor    EnvironmentalEmissionFactor? @relation(fields: [factorId], references: [id], onDelete: SetNull)
+  createdBy User?                        @relation("EnvironmentalRecordCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?                        @relation("EnvironmentalRecordUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([domain, competence])
+  @@index([company, competence])
+  @@index([metric, competence])
+  @@index([site])
+  @@index([factorId])
+  @@index([createdById])
+  @@index([updatedById])
+  @@index([active])
+}
+
+model AwsInvoiceEmailNotification {
+  id            String    @id @default(uuid())
+  invoiceId     String    @unique
+  billingPeriod String
+  recipients    String[]
+  amount        Decimal   @db.Decimal(18, 2)
+  currency      String
+  issuedAt      DateTime?
+  status        String    @default("PENDING")
+  attempts      Int       @default(0)
+  sentAt        DateTime?
+  lastError     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status, sentAt])
+  @@index([billingPeriod])
+}
+
+model CommercialOpportunity {
+  id                    String                     @id @default(uuid())
+  entryDate             DateTime                   @db.Date
+  client                String
+  project               String?
+  city                  String?
+  state                 String?
+  commercialResponsible String?
+  segment               String?
+  contractType          String?
+  opportunitySource     String?
+  hadCompetition        Boolean?
+  disputedValue         Decimal?                   @db.Decimal(18, 2)
+  closedValue           Decimal?                   @db.Decimal(18, 2)
+  status                String?
+  lossReason            String?
+  notes                 String?
+  sourceType            String                     @default("JR_MANUAL")
+  sourceFile            String?
+  sourceSheet           String?
+  sourceRow             Int?
+  sourceFingerprint     String?                    @unique
+  active                Boolean                    @default(true)
+  createdById           String?
+  updatedById           String?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  audits                CommercialIndicatorAudit[] @relation("CommercialOpportunityAudits")
+
+  @@index([entryDate])
+  @@index([status])
+  @@index([active, entryDate])
+}
+
+model CommercialProcessRecord {
+  id                        String                     @id @default(uuid())
+  route                     String
+  competition               String?
+  contractNumber            String?
+  contractingParty          String?
+  launchType                String?
+  requester                 String?
+  objectSummary             String?
+  client                    String?
+  complexity                String?
+  filledAt                  DateTime?                  @db.Date
+  contractSignedSentAt      DateTime?                  @db.Date
+  launchEmailSentAt         DateTime?                  @db.Date
+  workOpenedAt              DateTime?                  @db.Date
+  registrationConsultSentAt DateTime?                  @db.Date
+  registrationReturnedAt    DateTime?                  @db.Date
+  documentsSentAt           DateTime?                  @db.Date
+  startDate                 DateTime?                  @db.Date
+  plannedBusinessDays       Int?
+  dueDate                   DateTime?                  @db.Date
+  completedDate             DateTime?                  @db.Date
+  elapsedCalendarDays       Int?
+  elapsedBusinessDays       Int?
+  responsible               String?
+  notes                     String?
+  sourceType                String                     @default("JR_MANUAL")
+  sourceFile                String?
+  sourceSheet               String?
+  sourceRow                 Int?
+  sourceFingerprint         String?                    @unique
+  active                    Boolean                    @default(true)
+  createdById               String?
+  updatedById               String?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  audits                    CommercialIndicatorAudit[] @relation("CommercialProcessAudits")
+
+  @@index([route, startDate])
+  @@index([active, route])
+  @@index([dueDate])
+}
+
+model CommercialIndicatorAudit {
+  id            String                   @id @default(uuid())
+  entityType    String
+  entityId      String
+  action        String
+  actorId       String?
+  beforeData    Json?
+  afterData     Json?
+  changedAt     DateTime                 @default(now()) @db.Timestamptz(6)
+  opportunityId String?
+  processId     String?
+  opportunity   CommercialOpportunity?   @relation("CommercialOpportunityAudits", fields: [opportunityId], references: [id], onDelete: Cascade)
+  process       CommercialProcessRecord? @relation("CommercialProcessAudits", fields: [processId], references: [id], onDelete: Cascade)
+
+  @@index([entityType, entityId, changedAt])
+  @@index([actorId, changedAt])
+}
+
+model LegalCase {
+  id                  String                @id @default(uuid())
+  processKey          String                @unique
+  processNumber       String
+  area                String
+  company             String
+  claimantName        String?
+  plaintiffName       String?
+  defendantName       String?
+  notificationDate    DateTime?             @db.Date
+  lastMovementDate    DateTime?             @db.Date
+  closedAt            DateTime?             @db.Date
+  claimsDescription   String?
+  matter              String?
+  proceduralPhase     String?
+  originalClaimAmount Decimal?              @db.Decimal(18, 2)
+  riskProbability     String?
+  judgmentAmount      Decimal?              @db.Decimal(18, 2)
+  finalPaidAmount     Decimal?              @db.Decimal(18, 2)
+  status              String?
+  observations        String?
+  sourceType          String                @default("JR_MANUAL")
+  sourceFile          String?
+  sourceSheet         String?
+  sourceRow           Int?
+  sourceFingerprint   String?               @unique
+  active              Boolean               @default(true)
+  createdById         String?
+  updatedById         String?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  audits              LegalCaseAudit[]
+  attachments         LegalCaseAttachment[]
+
+  @@index([area, status])
+  @@index([company])
+  @@index([notificationDate])
+  @@index([lastMovementDate])
+  @@index([active, area])
+}
+
+model LegalCaseAttachment {
+  id             String    @id @default(uuid())
+  legalCaseId    String
+  fileName       String
+  fileKey        String    @unique
+  mimeType       String?
+  sizeBytes      Int?
+  uploadedById   String?
+  uploadedByName String?
+  active         Boolean   @default(true)
+  deletedAt      DateTime? @db.Timestamptz(6)
+  deletedById    String?
+  deletedByName  String?
+  createdAt      DateTime  @default(now()) @db.Timestamptz(6)
+  legalCase      LegalCase @relation(fields: [legalCaseId], references: [id], onDelete: Cascade)
+
+  @@index([legalCaseId, active, createdAt])
+  @@index([uploadedById, createdAt])
+}
+
+model LegalCaseAudit {
+  id          String    @id @default(uuid())
+  legalCaseId String
+  action      String
+  actorId     String?
+  actorName   String?
+  beforeData  Json?
+  afterData   Json?
+  changedAt   DateTime  @default(now()) @db.Timestamptz(6)
+  legalCase   LegalCase @relation(fields: [legalCaseId], references: [id], onDelete: Cascade)
+
+  @@index([legalCaseId, changedAt])
+  @@index([actorId, changedAt])
+}
+
+model LegalCaseImportBatch {
+  id               String                     @id @default(uuid())
+  fingerprint      String                     @unique
+  sourceFile       String
+  sourceFileSha256 String
+  status           String
+  candidateCount   Int                        @default(0)
+  appliedCount     Int                        @default(0)
+  skippedCount     Int                        @default(0)
+  exceptionCount   Int                        @default(0)
+  metadata         Json?
+  completedAt      DateTime?                  @db.Timestamptz(6)
+  createdAt        DateTime                   @default(now()) @db.Timestamptz(6)
+  rows             LegalCaseImportRow[]
+  exceptions       LegalCaseImportException[]
+}
+
+model LegalCaseImportRow {
+  id            String               @id @default(uuid())
+  batchId       String
+  legalCaseId   String?
+  sourceSheet   String
+  sourceRow     Int
+  payloadSha256 String
+  status        String
+  sourcePayload Json
+  createdAt     DateTime             @default(now()) @db.Timestamptz(6)
+  batch         LegalCaseImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, sourceSheet, sourceRow])
+  @@index([legalCaseId])
+}
+
+model LegalCaseImportException {
+  id          String               @id @default(uuid())
+  batchId     String
+  sourceSheet String
+  sourceRow   Int
+  field       String?
+  type        String
+  rawValue    Json?
+  detail      String?
+  createdAt   DateTime             @default(now()) @db.Timestamptz(6)
+  batch       LegalCaseImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId, sourceSheet, sourceRow])
+  @@index([type])
+}
+
+model LucasFleetRevenueSyncRun {
+  id                   String                         @id @default(uuid())
+  runId                String                         @unique
+  schemaVersion        String
+  dataset              String
+  source               String
+  ruleVersion          String
+  ruleHash             String
+  mode                 String
+  generatedAt          DateTime                       @db.Timestamptz(6)
+  scopeDateFrom        DateTime                       @db.Date
+  scopeDateToExclusive DateTime                       @db.Date
+  scopeBranches        String[]
+  scopeCompanies       String[]
+  scopeMetadata        Json
+  snapshotStartedAt    DateTime                       @db.Timestamptz(6)
+  snapshotFinishedAt   DateTime                       @db.Timestamptz(6)
+  snapshotComplete     Boolean
+  dryRun               Boolean
+  allowedForPosting    Boolean
+  batchTotal           Int
+  status               String                         @default("IN_PROGRESS")
+  receivedBatchCount   Int                            @default(0)
+  receivedRecordCount  Int                            @default(0)
+  finalizedRecordCount Int?
+  finalizedAmountTotal Decimal?                       @db.Decimal(65, 30)
+  manifest             Json?
+  completedAt          DateTime?                      @db.Timestamptz(6)
+  failedAt             DateTime?                      @db.Timestamptz(6)
+  failureReason        String?
+  createdAt            DateTime                       @default(now()) @db.Timestamptz(6)
+  updatedAt            DateTime                       @updatedAt @db.Timestamptz(6)
+  batches              LucasFleetRevenueSyncBatch[]
+  stagedFacts          LucasFleetRevenueStagingFact[]
+  canonicalFacts       LucasFleetRevenueFact[]        @relation("LucasFleetRevenueLastRun")
+
+  @@unique([dataset, runId])
+  @@index([status, generatedAt])
+  @@index([scopeDateFrom, scopeDateToExclusive])
+}
+
+model LucasFleetRevenueSyncBatch {
+  id                  String                   @id @default(uuid())
+  runDbId             String
+  batchNumber         Int
+  batchTotal          Int
+  producerPayloadHash String
+  serverPayloadHash   String
+  recordCount         Int
+  response            Json
+  processedAt         DateTime                 @default(now()) @db.Timestamptz(6)
+  run                 LucasFleetRevenueSyncRun @relation(fields: [runDbId], references: [id], onDelete: Restrict)
+
+  @@unique([runDbId, batchNumber])
+  @@index([producerPayloadHash])
+  @@index([serverPayloadHash])
+}
+
+model LucasFleetRevenueStagingFact {
+  id              String                   @id @default(uuid())
+  runDbId         String
+  nativeLocator   String
+  sourceKind      String
+  nativeKey       Json
+  companyId       String
+  sourceKey       String
+  aethosVehicleId String
+  eventDate       DateTime                 @db.Date
+  competence      DateTime                 @db.Date
+  amount          Decimal?                 @db.Decimal(65, 30)
+  sourceStatus    String?
+  active          Boolean
+  sourceUpdatedAt DateTime?                @db.Timestamptz(6)
+  planAccountId   String?
+  recordHash      String
+  raw             Json?
+  createdAt       DateTime                 @default(now()) @db.Timestamptz(6)
+  run             LucasFleetRevenueSyncRun @relation(fields: [runDbId], references: [id], onDelete: Cascade)
+
+  @@unique([runDbId, nativeLocator])
+  @@index([runDbId, competence])
+  @@index([aethosVehicleId, competence])
+}
+
+model LucasFleetRevenueFact {
+  id                 String                       @id @default(uuid())
+  dataset            String
+  source             String
+  nativeLocator      String
+  sourceKind         String
+  nativeKey          Json
+  companyId          String
+  sourceKey          String
+  aethosVehicleId    String
+  eventDate          DateTime                     @db.Date
+  competence         DateTime                     @db.Date
+  amount             Decimal?                     @db.Decimal(65, 30)
+  sourceStatus       String?
+  active             Boolean                      @default(true)
+  sourceUpdatedAt    DateTime?                    @db.Timestamptz(6)
+  planAccountId      String?
+  recordHash         String
+  raw                Json?
+  lastRunId          String
+  deactivatedAt      DateTime?                    @db.Timestamptz(6)
+  deactivationReason String?
+  syncedAt           DateTime                     @default(now()) @db.Timestamptz(6)
+  createdAt          DateTime                     @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime                     @updatedAt @db.Timestamptz(6)
+  lastRun            LucasFleetRevenueSyncRun     @relation("LucasFleetRevenueLastRun", fields: [lastRunId], references: [id], onDelete: Restrict)
+  audits             LucasFleetRevenueFactAudit[]
+
+  @@unique([dataset, source, nativeLocator])
+  @@index([aethosVehicleId, competence, active])
+  @@index([companyId, competence, active])
+  @@index([lastRunId])
+}
+
+model LucasFleetRevenueFactAudit {
+  id         BigInt                @id @default(autoincrement())
+  factId     String
+  operation  String
+  syncRunId  String
+  beforeData Json?
+  afterData  Json?
+  changedAt  DateTime              @default(now()) @db.Timestamptz(6)
+  fact       LucasFleetRevenueFact @relation(fields: [factId], references: [id], onDelete: Restrict)
+
+  @@index([factId, changedAt])
+  @@index([syncRunId])
+}
+

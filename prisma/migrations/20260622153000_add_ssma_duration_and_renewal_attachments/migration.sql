@@ -1,0 +1,5 @@
+ALTER TABLE "SsmaLicense"
+ADD COLUMN IF NOT EXISTS "durationMonths" INTEGER;
+
+ALTER TABLE "SsmaLicenseRenewal"
+ADD COLUMN IF NOT EXISTS "attachments" JSONB NOT NULL DEFAULT '[]';

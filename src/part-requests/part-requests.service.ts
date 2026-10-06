@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PartRequestStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePartRequestDto } from './dto/create-part-request.dto';
@@ -60,7 +65,11 @@ function canRequestPartsForOccurrence(occurrence: OccurrenceSnapshot) {
 export class PartRequestsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(actorRole?: string | null, actorId?: string | null, occurrenceId?: string) {
+  async findAll(
+    actorRole?: string | null,
+    actorId?: string | null,
+    occurrenceId?: string,
+  ) {
     const role = normalizeRole(actorRole);
 
     const where: any = {};
@@ -85,7 +94,11 @@ export class PartRequestsService {
     });
   }
 
-  async create(dto: CreatePartRequestDto, actorId?: string | null, actorRole?: string | null) {
+  async create(
+    dto: CreatePartRequestDto,
+    actorId?: string | null,
+    actorRole?: string | null,
+  ) {
     const role = normalizeRole(actorRole);
 
     if (!actorId) {
@@ -93,7 +106,9 @@ export class PartRequestsService {
     }
 
     if (role !== 'manutentor' && role !== 'admin') {
-      throw new ForbiddenException('Somente manutentor pode abrir solicitacao de peca');
+      throw new ForbiddenException(
+        'Somente manutentor pode abrir solicitacao de peca',
+      );
     }
 
     if (!dto.occurrenceId) {
@@ -113,11 +128,15 @@ export class PartRequestsService {
     }
 
     if (!canRequestPartsForOccurrence(occurrence)) {
-      throw new BadRequestException('Esta manutencao nao aceita solicitacao de peca nesta etapa');
+      throw new BadRequestException(
+        'Esta manutencao nao aceita solicitacao de peca nesta etapa',
+      );
     }
 
     if (role === 'manutentor' && occurrence.responsavelUserId !== actorId) {
-      throw new ForbiddenException('Somente o manutentor responsavel pode abrir esta solicitacao');
+      throw new ForbiddenException(
+        'Somente o manutentor responsavel pode abrir esta solicitacao',
+      );
     }
 
     return this.prisma.partRequest.create({
@@ -133,7 +152,11 @@ export class PartRequestsService {
     });
   }
 
-  async approveMaintenance(id: string, actorId?: string | null, actorRole?: string | null) {
+  async approveMaintenance(
+    id: string,
+    actorId?: string | null,
+    actorRole?: string | null,
+  ) {
     this.ensureMaintenanceRole(actorRole);
     if (!actorId) {
       throw new BadRequestException('Usuario autenticado nao encontrado');
@@ -141,7 +164,9 @@ export class PartRequestsService {
 
     const request = await this.ensureExists(id);
     if (request.status !== PartRequestStatus.PENDING_MAINTENANCE_APPROVAL) {
-      throw new BadRequestException('Solicitacao nao esta pendente de aprovacao da manutencao');
+      throw new BadRequestException(
+        'Solicitacao nao esta pendente de aprovacao da manutencao',
+      );
     }
 
     return this.prisma.partRequest.update({
@@ -158,7 +183,12 @@ export class PartRequestsService {
     });
   }
 
-  async rejectMaintenance(id: string, dto: ReviewPartRequestDto, actorId?: string | null, actorRole?: string | null) {
+  async rejectMaintenance(
+    id: string,
+    dto: ReviewPartRequestDto,
+    actorId?: string | null,
+    actorRole?: string | null,
+  ) {
     this.ensureMaintenanceRole(actorRole);
     if (!actorId) {
       throw new BadRequestException('Usuario autenticado nao encontrado');
@@ -166,7 +196,9 @@ export class PartRequestsService {
 
     const request = await this.ensureExists(id);
     if (request.status !== PartRequestStatus.PENDING_MAINTENANCE_APPROVAL) {
-      throw new BadRequestException('Solicitacao nao esta pendente de aprovacao da manutencao');
+      throw new BadRequestException(
+        'Solicitacao nao esta pendente de aprovacao da manutencao',
+      );
     }
 
     return this.prisma.partRequest.update({
@@ -181,11 +213,18 @@ export class PartRequestsService {
     });
   }
 
-  async respondPurchase(id: string, dto: RespondPartRequestDto, actorId?: string | null, actorRole?: string | null) {
+  async respondPurchase(
+    id: string,
+    dto: RespondPartRequestDto,
+    actorId?: string | null,
+    actorRole?: string | null,
+  ) {
     const role = normalizeRole(actorRole);
 
     if (role !== 'compras' && role !== 'admin') {
-      throw new ForbiddenException('Somente compras pode devolver a solicitacao');
+      throw new ForbiddenException(
+        'Somente compras pode devolver a solicitacao',
+      );
     }
 
     if (!actorId) {
@@ -202,7 +241,9 @@ export class PartRequestsService {
 
     const request = await this.ensureExists(id);
     if (request.status !== PartRequestStatus.APPROVED_FOR_PURCHASING) {
-      throw new BadRequestException('Solicitacao ainda nao foi liberada para compras');
+      throw new BadRequestException(
+        'Solicitacao ainda nao foi liberada para compras',
+      );
     }
 
     return this.prisma.partRequest.update({
@@ -222,7 +263,9 @@ export class PartRequestsService {
   private ensureMaintenanceRole(role?: string | null) {
     const normalizedRole = normalizeRole(role);
     if (normalizedRole !== 'manutencao' && normalizedRole !== 'admin') {
-      throw new ForbiddenException('Somente manutencao pode aprovar a solicitacao');
+      throw new ForbiddenException(
+        'Somente manutencao pode aprovar a solicitacao',
+      );
     }
   }
 

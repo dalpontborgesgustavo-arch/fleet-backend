@@ -5,5 +5,8 @@ export class CreateOccurrenceDto {
   questionLabel?: string | null;
   description?: string | null;
   severity?: string | null;
+  isEmergency?: boolean | null;
+  responsavelUserId?: string | null;
+  maintenanceTargetUserId?: string | null;
   photos?: string[];
 }
