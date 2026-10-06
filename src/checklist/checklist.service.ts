@@ -1106,9 +1106,7 @@ function resolveMonthlyAssignment(
   vehicle: MonthlyAssignmentVehicle,
 ): MonthlyAssignment {
   const responsibleName = cleanAssignmentName(dto.responsibleName);
-  const submittedDriverName = dto.vehicleStopped === true
-    ? null
-    : cleanAssignmentName(dto.driverName);
+  const submittedDriverName = cleanAssignmentName(dto.driverName);
   const previousDriverName = cleanAssignmentName(vehicle.currentDriverName);
   const previousResponsibleName = cleanAssignmentName(
     vehicle.currentResponsibleName,

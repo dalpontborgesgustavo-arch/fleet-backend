@@ -132,7 +132,7 @@ export class TotvsEmployeeIntegrationService {
       schedule: DAILY_SYNC_CRON,
       timeZone: DAILY_SYNC_TIME_ZONE,
       formulaEnabled: true,
-      costRule: 'IND_BI_0025_TOTAL_GERAL_LINHA_COM_RATEIO_DA_FONTE',
+      costRule: 'TOTAL_GERAL_LINHA_PERIODOS_20_30_40_SEM_PFRATEIOFIXO',
       lastRun,
     };
   }
@@ -305,7 +305,6 @@ export class TotvsEmployeeIntegrationService {
       const aggregateCreates: any[] = [];
       let employeeVersions = 0;
       let aggregateVersions = 0;
-      const PreciseDecimal = Prisma.Decimal.clone({ precision: 65 });
 
       for (const [key, rows] of groups) {
         const first = rows[0];
@@ -345,13 +344,7 @@ export class TotvsEmployeeIntegrationService {
         const allocationValues = rows.map((row) => row.fixedAllocationValue).filter((value): value is Prisma.Decimal => value !== null);
         const totalValues = rows.map((row) => row.totalGeneralLine).filter((value): value is Prisma.Decimal => value !== null);
         const fixedAllocationValue = allocationValues.length ? allocationValues.reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0)) : null;
-        const totalGeneralLine = totalValues.length
-          ? totalValues.reduce((sum, value) => sum.plus(value.toString()), new PreciseDecimal(0))
-          : null;
-        // A 0025 ja aplica COALESCE(..., 0) aos componentes opcionais e o
-        // rateio no TOTAL GERAL LINHA. Zero e um valor valido na base, mas
-        // nao homologa a alocacao por grupo ou a cobertura historica.
-        const sourceTotalKnown = rejectedRows === 0 && totalValues.length === rows.length;
+        const totalGeneralLine = totalValues.length ? totalValues.reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0)) : null;
         const aggregateData = {
           sourceRows: rows.length,
           allocationRows: allocationValues.length,
@@ -359,9 +352,7 @@ export class TotvsEmployeeIntegrationService {
           totalGeneralLine: totalGeneralLine?.toFixed(6) || null,
           allocationClosed: false,
           officialCostEligible: false,
-          pendingReason: sourceTotalKnown
-            ? 'MAPA_SECAO_GRUPO_E_COBERTURA_PENDENTES'
-            : 'TOTAL_GERAL_LINHA_AUSENTE_OU_LINHA_REJEITADA',
+          pendingReason: 'PFRATEIOFIXO_CARDINALIDADE_NAO_RECONCILIADA',
         };
         const aggregateHash = canonicalHash(aggregateData);
         const currentAggregate = currentAggregateByKey.get(key);
