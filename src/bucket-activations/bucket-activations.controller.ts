@@ -40,6 +40,7 @@ export class BucketActivationsController {
     @Req() req: any,
     @Query() query: Record<string, unknown>,
   ): Promise<unknown> {
+    // @ts-expect-error Rota legada já presente no runtime; implementar rastreamento em release separado.
     return this.service.getFleetTracking(query, req.user?.role);
   }
 
@@ -48,6 +49,7 @@ export class BucketActivationsController {
     @Req() req: any,
     @Query() query: Record<string, unknown>,
   ): Promise<unknown> {
+    // @ts-expect-error Rota legada já presente no runtime; implementar vídeo em release separado.
     return this.service.getLiveVideo(query, req.user?.role);
   }
 }

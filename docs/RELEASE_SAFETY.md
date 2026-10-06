@@ -21,11 +21,22 @@ o servidor nem reiniciar o serviço antes dos gates abaixo.
 - Depois de excluir da base um serviço RNC sem importações (preservado no
   histórico/local original), a compilação limpa e o runtime têm exatamente
   238 arquivos JS com os mesmos caminhos. Comparando conteúdo com CRLF/LF
-  normalizados, 237 coincidem; somente
-  `bucket-activations.service.js` difere. Ele inclui métodos de rastreamento
-  e vídeo ausentes do runtime atual, embora o controller já exponha essas
-  rotas. Essa mudança precisa ser revista e testada como release próprio,
-  nunca entrar incidentalmente com outra publicação.
+  normalizados, a base anterior tinha 237 coincidências; somente
+  `bucket-activations.service.js` diferia. Nesta branch de paridade, a
+  implementação nova de rastreamento/vídeo foi retirada do serviço: o JS
+  gerado desse arquivo coincide com o snapshot salvo do runtime em produção.
+  Os demais 237 JS são idênticos aos da base já comparada. Isso **não**
+  substitui uma comparação fresca com todos os 238 JS no servidor antes de
+  publicar. O controller já expunha `/fleet` e `/video` sem implementação
+  correspondente no runtime; mantê-lo intacto preserva o comportamento
+  atual, não declara essas rotas funcionais. A correção delas requer release
+  próprio, com testes de contrato.
+- O build e os dois testes específicos de `bucket-activations` passam nesta
+  branch. A suíte Jest completa ainda falha em 9 arquivos / 34 testes de
+  outros módulos por testes/mocks defasados. A base anterior foi executada
+  separadamente e falhou nos mesmos 9 arquivos, com a mesma contagem de
+  testes; essas falhas impedem tratar o gate geral como verde até serem
+  reconciliadas separadamente.
 - A API de medições atmosféricas e a tela correspondente estão apenas em
   branches/preview. Não fazem parte da produção.
 
