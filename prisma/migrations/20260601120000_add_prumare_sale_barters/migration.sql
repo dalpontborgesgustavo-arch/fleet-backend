@@ -1,0 +1,4 @@
+ALTER TYPE "PrumareReceivableType" ADD VALUE IF NOT EXISTS 'PERMUTA';
+
+ALTER TABLE "PrumareLot"
+  ADD COLUMN IF NOT EXISTS "saleBarters" JSONB;
