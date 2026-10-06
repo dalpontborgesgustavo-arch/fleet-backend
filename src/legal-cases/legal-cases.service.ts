@@ -8,7 +8,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3UploadService } from '../storage/s3-upload.service';
 
-const ALLOWED_ROLES = new Set(['juridico', 'gestor', 'ceo']);
+const ALLOWED_ROLES = new Set(['admin', 'juridico', 'gestor', 'ceo']);
 const AREAS = new Set(['TRABALHISTA', 'CIVEL']);
 const COMPANIES = new Set([
   'JR_CONSTRUCOES',

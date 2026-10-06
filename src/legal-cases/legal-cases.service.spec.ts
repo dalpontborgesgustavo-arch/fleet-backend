@@ -6,11 +6,14 @@ import {
 } from './legal-cases.service';
 
 describe('LegalCasesService helpers', () => {
-  it.each(['admin', 'juridico', 'JURIDICO'])('permite %s', (role) => {
-    expect(() => ensureLegalCasesAccess(role)).not.toThrow();
-  });
+  it.each(['admin', 'gestor', 'ceo', 'juridico', 'JURIDICO'])(
+    'permite %s',
+    (role) => {
+      expect(() => ensureLegalCasesAccess(role)).not.toThrow();
+    },
+  );
 
-  it.each(['gestor', 'administrativo', 'qualidade', undefined])(
+  it.each(['administrativo', 'qualidade', undefined])(
     'bloqueia %s',
     (role) => {
       expect(() => ensureLegalCasesAccess(role)).toThrow(ForbiddenException);
