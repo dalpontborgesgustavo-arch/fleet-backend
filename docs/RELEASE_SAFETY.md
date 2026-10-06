@@ -13,15 +13,15 @@ o servidor nem reiniciar o serviço antes dos gates abaixo.
 - As 196 migrações aplicadas foram recuperadas com seus checksums originais.
   A comparação do banco com a árvore de migrações candidata retornou zero
   ausentes, divergentes ou pendentes. Nenhuma migração foi executada.
-- A fonte de `checklist.service.js` e
-  `totvs-employee-integration.service.js` foi alinhada ao comportamento atual:
+- A fonte de `checklist.service.js`,
+  `totvs-employee-integration.service.js` e
+  `usina-asphalt-teams.service.js` foi alinhada ao comportamento atual:
   os JS gerados ficaram idênticos aos arquivos em execução. As mudanças mais
-  novas permanecem recuperáveis no histórico da branch e não entraram no ar.
+  novas permanecem recuperáveis no histórico e não entraram no ar.
 - Uma compilação limpa ainda difere do runtime em
-  `bucket-activations.service.js` e `usina-asphalt-teams.service.js`.
-  Há também módulos presentes somente na compilação candidata. Essas
-  diferenças requerem revisão funcional antes de qualquer substituição do
-  runtime.
+  `bucket-activations.service.js`. Há também módulos presentes somente na
+  compilação candidata. Essas diferenças requerem revisão funcional antes de
+  qualquer substituição do runtime.
 - A API de medições atmosféricas e a tela correspondente estão apenas em
   branches/preview. Não fazem parte da produção.
 

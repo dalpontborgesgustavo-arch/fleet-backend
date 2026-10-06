@@ -1,2 +1,4 @@
 # Prisma stores a checksum of each migration's exact bytes. Do not rewrite line endings.
 prisma/migrations/**/migration.sql -text
+# Embedded SQL template literals contain newline bytes; preserve LF on every host.
+src/usina-asphalt-teams/usina-asphalt-teams.service.ts text eol=lf

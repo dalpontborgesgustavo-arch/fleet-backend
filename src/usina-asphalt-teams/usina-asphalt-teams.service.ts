@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  canAccessUsinaAsphaltTeamSettings,
   canAccessUsinaAsphaltTeams,
   dateKey,
   normalizeAssignmentInput,
@@ -45,6 +46,8 @@ import {
   normalizeEquipmentCostMetric,
   reconcileUsinaAsphaltEquipmentCosts,
 } from './usina-asphalt-equipment-cost.rules';
+import { reconcileUsinaAsphaltTeamLaborCosts } from './usina-asphalt-team-labor-cost.rules';
+import { reconcileUsinaAsphaltEquipmentDerivedCosts } from './usina-asphalt-equipment-derived-cost.rules';
 
 function previousDay(value: Date) {
   return new Date(value.getTime() - 86400000);
@@ -61,7 +64,9 @@ const fleetSearchCollator = new Intl.Collator('pt-BR', {
 });
 
 function normalizeFleetSearchValue(value: unknown) {
-  const normalized = String(value || '').trim().toLocaleLowerCase('pt-BR');
+  const normalized = String(value || '')
+    .trim()
+    .toLocaleLowerCase('pt-BR');
   return /^\d+$/.test(normalized)
     ? normalized.replace(/^0+(?=\d)/, '')
     : normalized;
@@ -101,7 +106,26 @@ export class UsinaAsphaltTeamsService {
   private ensureAccess(role?: string | null) {
     if (!canAccessUsinaAsphaltTeams(role)) {
       throw new ForbiddenException(
-        'Somente Licitacao e Administrador podem acessar as equipes de asfalto',
+        'Somente Licitacao Gestor e Administrador podem acessar os custos das equipes de asfalto',
+      );
+    }
+  }
+
+  private ensureSettingsAccess(role?: string | null) {
+    if (!canAccessUsinaAsphaltTeamSettings(role)) {
+      throw new ForbiddenException(
+        'Sem permissao para acessar os cadastros mensais das equipes de asfalto',
+      );
+    }
+  }
+
+  private ensureReadAccess(role?: string | null) {
+    if (
+      !canAccessUsinaAsphaltTeams(role) &&
+      !canAccessUsinaAsphaltTeamSettings(role)
+    ) {
+      throw new ForbiddenException(
+        'Sem permissao para consultar as equipes de asfalto',
       );
     }
   }
@@ -235,7 +259,7 @@ export class UsinaAsphaltTeamsService {
   }
 
   async findAll(role?: string | null, includeDeleted = false) {
-    this.ensureAccess(role);
+    this.ensureReadAccess(role);
     const teams = await this.prisma.usinaAsphaltTeam.findMany({
       where: {
         companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
@@ -284,7 +308,7 @@ export class UsinaAsphaltTeamsService {
   }
 
   async searchActiveAethosVehicles(search: unknown, role?: string | null) {
-    this.ensureAccess(role);
+    this.ensureSettingsAccess(role);
     const term = String(search || '').trim();
     const vehicles = await this.prisma.vehicle.findMany({
       where: {
@@ -423,11 +447,8 @@ export class UsinaAsphaltTeamsService {
     return new Map(users.map((user) => [user.id, user.name]));
   }
 
-  async listEquipmentHourlyRates(
-    yearValue: unknown,
-    role?: string | null,
-  ) {
-    this.ensureAccess(role);
+  async listEquipmentHourlyRates(yearValue: unknown, role?: string | null) {
+    this.ensureSettingsAccess(role);
     const year = this.parseYear(yearValue);
     const from = new Date(Date.UTC(year, 0, 1));
     const to = new Date(Date.UTC(year + 1, 0, 1));
@@ -495,7 +516,7 @@ export class UsinaAsphaltTeamsService {
     categoryValue: unknown,
     role?: string | null,
   ) {
-    this.ensureAccess(role);
+    this.ensureSettingsAccess(role);
     const competence = normalizeCompetence(competenceValue);
     const category = normalizeEquipmentRateCategory(categoryValue);
     const rates = await this.prisma.usinaAsphaltEquipmentHourlyRate.findMany({
@@ -536,7 +557,7 @@ export class UsinaAsphaltTeamsService {
     actorValue?: string | null,
     role?: string | null,
   ) {
-    this.ensureAccess(role);
+    this.ensureSettingsAccess(role);
     const actorId = this.ensureActor(actorValue);
     const input = normalizeEquipmentHourlyRateInput(body);
     try {
@@ -550,17 +571,16 @@ export class UsinaAsphaltTeamsService {
         await tx.$executeRaw(
           Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`USINA_ASPHALT_RATE|${lockKey}`}, 0))`,
         );
-        const current =
-          await tx.usinaAsphaltEquipmentHourlyRate.findFirst({
-            where: {
-              companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
-              unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
-              competence: input.competence,
-              category: input.category,
-              isCurrent: true,
-              deletedAt: null,
-            },
-          });
+        const current = await tx.usinaAsphaltEquipmentHourlyRate.findFirst({
+          where: {
+            companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+            unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+            competence: input.competence,
+            category: input.category,
+            isCurrent: true,
+            deletedAt: null,
+          },
+        });
         if (
           current &&
           current.productiveRate.equals(input.productiveRate) &&
@@ -568,16 +588,15 @@ export class UsinaAsphaltTeamsService {
         ) {
           return { rate: current, idempotent: true };
         }
-        const latest =
-          await tx.usinaAsphaltEquipmentHourlyRate.findFirst({
-            where: {
-              companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
-              unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
-              competence: input.competence,
-              category: input.category,
-            },
-            orderBy: { version: 'desc' },
-          });
+        const latest = await tx.usinaAsphaltEquipmentHourlyRate.findFirst({
+          where: {
+            companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+            unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+            competence: input.competence,
+            category: input.category,
+          },
+          orderBy: { version: 'desc' },
+        });
         if (current) {
           await tx.usinaAsphaltEquipmentHourlyRate.update({
             where: { id: current.id },
@@ -642,7 +661,7 @@ export class UsinaAsphaltTeamsService {
     actorValue?: string | null,
     role?: string | null,
   ) {
-    this.ensureAccess(role);
+    this.ensureSettingsAccess(role);
     const actorId = this.ensureActor(actorValue);
     const competence = normalizeCompetence(competenceValue);
     const category = normalizeEquipmentRateCategory(categoryValue);
@@ -666,7 +685,8 @@ export class UsinaAsphaltTeamsService {
           deletedAt: null,
         },
       });
-      if (!current) throw new NotFoundException('Tarifa vigente nao encontrada');
+      if (!current)
+        throw new NotFoundException('Tarifa vigente nao encontrada');
       const updated = await tx.usinaAsphaltEquipmentHourlyRate.update({
         where: { id: current.id },
         data: {
@@ -1073,6 +1093,13 @@ export class UsinaAsphaltTeamsService {
       competence: dateKey(assignment.competence),
       validFrom: dateKey(assignment.validFrom),
       validTo: dateKey(assignment.validTo),
+      operatorAssignments: (assignment.operatorAssignments || []).map(
+        (operator: any) => ({
+          ...operator,
+          validFrom: dateKey(operator.validFrom),
+          validTo: dateKey(operator.validTo),
+        }),
+      ),
     };
   }
 
@@ -1117,6 +1144,10 @@ export class UsinaAsphaltTeamsService {
           deletedAt: null,
         },
         include: {
+          operatorAssignments: {
+            where: { deletedAt: null },
+            orderBy: { validFrom: 'asc' },
+          },
           team: {
             include: {
               versions: {
@@ -1327,7 +1358,7 @@ export class UsinaAsphaltTeamsService {
   }
 
   async findFleetAssignments(competenceValue: unknown, role?: string | null) {
-    this.ensureAccess(role);
+    this.ensureReadAccess(role);
     const competence = normalizeCompetence(competenceValue);
     const assignments =
       await this.prisma.usinaAsphaltTeamFleetAssignment.findMany({
@@ -1338,6 +1369,10 @@ export class UsinaAsphaltTeamsService {
           deletedAt: null,
         },
         include: {
+          operatorAssignments: {
+            where: { deletedAt: null },
+            orderBy: [{ employeeDisplayName: 'asc' }, { validFrom: 'asc' }],
+          },
           team: {
             include: {
               versions: {
@@ -1373,7 +1408,7 @@ export class UsinaAsphaltTeamsService {
     actorValue?: string | null,
     role?: string | null,
   ) {
-    this.ensureAccess(role);
+    this.ensureSettingsAccess(role);
     const actorId = this.ensureActor(actorValue);
     const input = normalizeFleetAssignmentInput(body);
     try {
@@ -1450,7 +1485,7 @@ export class UsinaAsphaltTeamsService {
     actorValue?: string | null,
     role?: string | null,
   ) {
-    this.ensureAccess(role);
+    this.ensureSettingsAccess(role);
     const actorId = this.ensureActor(actorValue);
     const input = normalizeFleetAssignmentInput(body);
     const teamId = String(body?.teamId || '').trim();
@@ -1526,7 +1561,7 @@ export class UsinaAsphaltTeamsService {
     actorValue?: string | null,
     role?: string | null,
   ) {
-    this.ensureAccess(role);
+    this.ensureSettingsAccess(role);
     const actorId = this.ensureActor(actorValue);
     const reason = optionalText(body?.reason, 500);
     if (!reason)
@@ -1561,7 +1596,7 @@ export class UsinaAsphaltTeamsService {
     actorValue?: string | null,
     role?: string | null,
   ) {
-    this.ensureAccess(role);
+    this.ensureSettingsAccess(role);
     const actorId = this.ensureActor(actorValue);
     const target = normalizeCompetence(body?.competence);
     const previous = new Date(
@@ -1828,6 +1863,8 @@ export class UsinaAsphaltTeamsService {
       lastFreightRun,
       lastPayableRun,
       lastInternalConsumptionRun,
+      laborCostAggregates,
+      equipmentHoursRuns,
     ] = await Promise.all([
       this.reconciliation(year, role, includeFacts),
       this.prisma.usinaAsphaltTeamVersion.findMany({
@@ -1845,6 +1882,12 @@ export class UsinaAsphaltTeamsService {
           unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
           deletedAt: null,
           competence: { gte: from, lt: to },
+        },
+        include: {
+          operatorAssignments: {
+            where: { deletedAt: null },
+            orderBy: { validFrom: 'asc' },
+          },
         },
       }),
       this.prisma.usinaAsphaltFleetFreightFact.findMany({
@@ -1971,6 +2014,41 @@ export class UsinaAsphaltTeamsService {
           scopeDateTo: true,
         },
       }),
+      this.prisma.totvsEmployeeCostAggregate.findMany({
+        where: {
+          companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+          unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+          competence: { gte: from, lt: to },
+          period: { in: [20, 30, 40] },
+          isCurrent: true,
+          active: true,
+        },
+        select: {
+          employeeKey: true,
+          competence: true,
+          period: true,
+          totalGeneralLine: true,
+          sourceRows: true,
+          isCurrent: true,
+          active: true,
+        },
+        orderBy: [
+          { competence: 'asc' },
+          { employeeKey: 'asc' },
+          { period: 'asc' },
+        ],
+      }),
+      this.prisma.usinaSyncRun.findMany({
+        where: {
+          dataset: 'ASPHALT_EQUIPMENT_HOURS',
+          status: 'COMPLETED',
+          scopeCompanyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+          scopeUnitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+          scopeDateFrom: { lt: to },
+          scopeDateTo: { gte: from },
+        },
+        select: { scopeDateFrom: true, scopeDateTo: true, syncRunId: true },
+      }),
     ]);
 
     const coveredCompetences = new Set<string>();
@@ -2044,6 +2122,30 @@ export class UsinaAsphaltTeamsService {
       year,
       groups: equipmentHoursReadback.groups,
       rateMonths: equipmentHourlyRates.months,
+      assignments,
+      coveredCompetences: new Set(
+        Array.from({ length: 12 }, (_, monthIndex) => {
+          const start = new Date(Date.UTC(year, monthIndex, 1));
+          const end = new Date(Date.UTC(year, monthIndex + 1, 0));
+          return equipmentHoursRuns.some(
+            (run) => run.scopeDateFrom <= start && run.scopeDateTo >= end,
+          )
+            ? dateKey(start)
+            : null;
+        }).filter((value): value is string => value !== null),
+      ),
+    });
+    const laborCosts = reconcileUsinaAsphaltTeamLaborCosts({
+      year,
+      profiles,
+      assignments,
+      costAggregates: laborCostAggregates,
+    });
+    const equipmentDerivedCosts = reconcileUsinaAsphaltEquipmentDerivedCosts({
+      year,
+      productionMonths: production.months,
+      equipmentMonths: equipmentCosts.months,
+      laborMonths: laborCosts.months,
     });
     return {
       context: USINA_ASPHALT_TEAM_CONTEXT,
@@ -2072,6 +2174,8 @@ export class UsinaAsphaltTeamsService {
       derivedCosts,
       equipmentHourlyRates,
       equipmentCosts,
+      laborCosts,
+      equipmentDerivedCosts,
       synchronization: {
         production: lastProductionRun,
         fleetFreight: lastFreightRun,
@@ -2105,6 +2209,8 @@ export class UsinaAsphaltTeamsService {
         'shared_cost',
         'derived_cost',
         'equipment_cost',
+        'labor_cost',
+        'equipment_derived_cost',
       ].includes(kind)
     ) {
       throw new BadRequestException('Tipo de memoria invalido');
@@ -2112,6 +2218,64 @@ export class UsinaAsphaltTeamsService {
     const from = new Date(Date.UTC(year, month - 1, 1));
     const to = new Date(Date.UTC(year, month, 1));
     const competence = dateKey(from);
+
+    if (kind === 'equipment_derived_cost') {
+      const metric = normalizeDerivedCostMetric(input?.metric);
+      const dashboard = await this.dashboard(year, role, false);
+      const team = dashboard.equipmentDerivedCosts.months[
+        month - 1
+      ]?.teams.find((item) => item.teamId === teamId);
+      if (!team) throw new NotFoundException('Equipe nao encontrada no mes');
+      return {
+        kind,
+        metric,
+        year,
+        month,
+        competence,
+        teamId,
+        formula:
+          metric === 'TOTAL'
+            ? dashboard.equipmentDerivedCosts.formulas.total
+            : dashboard.equipmentDerivedCosts.formulas.unitCost,
+        value: metric === 'TOTAL' ? team.totalAmount : team.unitCost,
+        amount: team.totalAmount,
+        totalAmount: team.totalAmount,
+        productionTon: team.productionTon,
+        unitCost: team.unitCost,
+        status: team.status,
+        components: team.components,
+        persistence: dashboard.equipmentDerivedCosts.persistence,
+        participatesInFirstConsolidated: false,
+        integrity: dashboard.equipmentDerivedCosts.integrity,
+      };
+    }
+
+    if (kind === 'labor_cost') {
+      const dashboard = await this.dashboard(year, role, false);
+      const team = dashboard.laborCosts.months[month - 1]?.teams.find(
+        (item) => item.teamId === teamId,
+      );
+      if (!team) throw new NotFoundException('Equipe nao encontrada no mes');
+      return {
+        kind,
+        year,
+        month,
+        competence,
+        teamId,
+        formula: dashboard.laborCosts.formula,
+        source: dashboard.laborCosts.source,
+        value: team.amount,
+        amount: team.amount,
+        status: team.status,
+        linkedEmployeeCount: team.linkedEmployeeCount,
+        deduplicatedEmployeeCount: team.deduplicatedEmployeeCount,
+        conflictEmployeeCount: team.conflictEmployeeCount,
+        conflictEmployees: team.conflictEmployees,
+        employees: team.employees,
+        persistence: dashboard.laborCosts.persistence,
+        participatesInFirstConsolidated: false,
+      };
+    }
 
     if (kind === 'equipment_cost') {
       const metric = normalizeEquipmentCostMetric(input?.metric);
@@ -2141,8 +2305,7 @@ export class UsinaAsphaltTeamsService {
       const hours = facts.length
         ? facts
             .reduce(
-              (sum: Prisma.Decimal, fact: any) =>
-                sum.plus(fact.quantityHours),
+              (sum: Prisma.Decimal, fact: any) => sum.plus(fact.quantityHours),
               new Prisma.Decimal(0),
             )
             .toFixed(6)
@@ -2152,8 +2315,8 @@ export class UsinaAsphaltTeamsService {
       );
       const rate =
         hourType === 'PRODUTIVA'
-          ? rateRow?.productiveRate ?? null
-          : rateRow?.unproductiveRate ?? null;
+          ? (rateRow?.productiveRate ?? null)
+          : (rateRow?.unproductiveRate ?? null);
       const amount =
         hours !== null && rate !== null
           ? new Prisma.Decimal(hours).mul(rate).toFixed(6)
@@ -2187,9 +2350,7 @@ export class UsinaAsphaltTeamsService {
           amount:
             rate === null
               ? null
-              : new Prisma.Decimal(fact.quantityHours)
-                  .mul(rate)
-                  .toFixed(6),
+              : new Prisma.Decimal(fact.quantityHours).mul(rate).toFixed(6),
         })),
       };
     }
@@ -2283,9 +2444,7 @@ export class UsinaAsphaltTeamsService {
         teamId,
         label: metric === 'TOTAL' ? 'TOTAL (R$)' : 'CUSTO UNIT. (R$/T)',
         covered:
-          metric === 'TOTAL'
-            ? team.costsCovered
-            : team.status === 'CALCULADO',
+          metric === 'TOTAL' ? team.costsCovered : team.status === 'CALCULADO',
         status: team.status,
         totalAmount: team.totalAmount,
         productionTon: team.productionTon,
