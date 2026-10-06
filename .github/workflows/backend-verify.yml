@@ -26,4 +26,6 @@ jobs:
       - run: npx prisma generate
       - run: node scripts/verify-applied-migrations.mjs
       - run: npm run build
+      - run: node --check scripts/verify-backend-release.mjs
+      - run: node scripts/compare-runtime-artifacts.mjs dist dist
       - run: npm test -- --runInBand --passWithNoTests src/environmental

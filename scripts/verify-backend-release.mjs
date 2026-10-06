@@ -10,6 +10,10 @@ if (!deployedDist || allowOptions.some((option) => !option.startsWith('--allow='
   console.error('Uso: node scripts/verify-backend-release.mjs <dist-em-produção> [--allow=src/arquivo.js]');
   process.exit(2);
 }
+if (process.platform === 'win32') {
+  console.error('Execute este preflight no servidor Linux, em um checkout isolado do serviço ativo.');
+  process.exit(2);
+}
 
 function run(command, args) {
   return execFileSync(command, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim();
@@ -31,7 +35,7 @@ if (head !== remoteMain) fail('HEAD difere de origin/main.');
 
 const node = process.execPath;
 run(node, [join(root, 'scripts', 'verify-applied-migrations.mjs'), '--database']);
-run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build']);
+run('npm', ['run', 'build']);
 run(node, [join(root, 'scripts', 'compare-runtime-artifacts.mjs'), join(root, 'dist'), deployedDist, ...allowOptions]);
 
 console.log(`Pré-publicação aprovada para o commit ${head}. Nenhum serviço foi alterado.`);
