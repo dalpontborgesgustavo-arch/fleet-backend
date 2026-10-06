@@ -10,9 +10,10 @@ o servidor nem reiniciar o serviço antes dos gates abaixo.
 - O servidor executa JavaScript compilado em `dist` que não pode ser reproduzido
   integralmente a partir do seu checkout de origem. O checkout tinha centenas
   de arquivos modificados/não rastreados; não é base de release.
-- As 196 migrações aplicadas foram recuperadas com seus checksums originais.
-  A comparação do banco com a árvore de migrações candidata retornou zero
-  ausentes, divergentes ou pendentes. Nenhuma migração foi executada.
+- Em 06/10, leitura somente leitura pelo AWS Systems Manager confirmou no RDS
+  196 migrações aplicadas, 9 historicamente revertidas e nenhuma falha
+  pendente. O digest dos nomes e checksums das 196 aplicadas coincide com o
+  manifesto Git. Nenhuma migração foi executada.
 - A fonte de `checklist.service.js`,
   `totvs-employee-integration.service.js` e
   `usina-asphalt-teams.service.js` foi alinhada ao comportamento atual:
@@ -20,23 +21,23 @@ o servidor nem reiniciar o serviço antes dos gates abaixo.
   novas permanecem recuperáveis no histórico e não entraram no ar.
 - Depois de excluir da base um serviço RNC sem importações (preservado no
   histórico/local original), a compilação limpa e o runtime têm exatamente
-  238 arquivos JS com os mesmos caminhos. Comparando conteúdo com CRLF/LF
-  normalizados, a base anterior tinha 237 coincidências; somente
-  `bucket-activations.service.js` diferia. Nesta branch de paridade, a
-  implementação nova de rastreamento/vídeo foi retirada do serviço: o JS
-  gerado desse arquivo coincide com o snapshot salvo do runtime em produção.
-  Os demais 237 JS são idênticos aos da base já comparada. Isso **não**
-  substitui uma comparação fresca com todos os 238 JS no servidor antes de
-  publicar. O controller já expunha `/fleet` e `/video` sem implementação
-  correspondente no runtime; mantê-lo intacto preserva o comportamento
-  atual, não declara essas rotas funcionais. A correção delas requer release
-  próprio, com testes de contrato.
-- O build e os dois testes específicos de `bucket-activations` passam nesta
-  branch. A suíte Jest completa ainda falha em 9 arquivos / 34 testes de
-  outros módulos por testes/mocks defasados. A base anterior foi executada
-  separadamente e falhou nos mesmos 9 arquivos, com a mesma contagem de
-  testes; essas falhas impedem tratar o gate geral como verde até serem
-  reconciliadas separadamente.
+  238 arquivos JS com os mesmos caminhos. Em 06/10, nova comparação somente
+  leitura com o artefato executado pelo PM2 confirmou **238/238 arquivos com
+  conteúdo idêntico após normalizar CRLF/LF** na branch de paridade
+  `codex/backend-tracking-runtime-parity`. Treze diferenças de hash bruto eram
+  apenas finais de linha do build Windows. Essa confirmação é um retrato do
+  runtime atual, não autoriza publicar uma branch diferente sem nova comparação.
+  O controller já expunha `/fleet` e `/video` sem implementação correspondente
+  no runtime; mantê-lo intacto preserva o comportamento atual, não declara
+  essas rotas funcionais. A correção delas requer release próprio, com testes
+  de contrato.
+- A branch isolada `codex/backend-test-gates-20261006` contém a API ambiental,
+  três restaurações de comportamento solicitadas (Aethos tributário, acesso
+  administrativo a processos jurídicos e proteção de frota duplicada) e mocks
+  de teste atualizados. O build e a suíte Jest completa passaram localmente:
+  26 suítes, 179 testes. O workflow de CI agora executa a suíte completa.
+  Essas mudanças **ainda não estão em produção**; por alterarem o runtime,
+  requerem revisão, comparação de artefatos com allowlist exata e readback.
 - A API de medições atmosféricas e a tela correspondente estão apenas em
   branches/preview. Não fazem parte da produção.
 
