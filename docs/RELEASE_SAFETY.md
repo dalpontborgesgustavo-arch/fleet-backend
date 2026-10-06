@@ -18,10 +18,14 @@ o servidor nem reiniciar o serviço antes dos gates abaixo.
   `usina-asphalt-teams.service.js` foi alinhada ao comportamento atual:
   os JS gerados ficaram idênticos aos arquivos em execução. As mudanças mais
   novas permanecem recuperáveis no histórico e não entraram no ar.
-- Uma compilação limpa ainda difere do runtime em
-  `bucket-activations.service.js`. Há também módulos presentes somente na
-  compilação candidata. Essas diferenças requerem revisão funcional antes de
-  qualquer substituição do runtime.
+- Depois de excluir da base um serviço RNC sem importações (preservado no
+  histórico/local original), a compilação limpa e o runtime têm exatamente
+  238 arquivos JS com os mesmos caminhos. Comparando conteúdo com CRLF/LF
+  normalizados, 237 coincidem; somente
+  `bucket-activations.service.js` difere. Ele inclui métodos de rastreamento
+  e vídeo ausentes do runtime atual, embora o controller já exponha essas
+  rotas. Essa mudança precisa ser revista e testada como release próprio,
+  nunca entrar incidentalmente com outra publicação.
 - A API de medições atmosféricas e a tela correspondente estão apenas em
   branches/preview. Não fazem parte da produção.
 
