@@ -7,7 +7,6 @@ import { Prisma } from '@prisma/client';
 import {
   businessDaysBetween,
   ContractsService,
-  detectContractWorkflowType,
   ensureContractReadAccess,
   ensureContractWriteAccess,
   workflowTemplate,
@@ -84,16 +83,25 @@ describe('ContractsService', () => {
     );
   });
 
-  it('classifies contractor contracts from the official account plan rule', () => {
-    expect(detectContractWorkflowType({ accountPlanAethosId: '750' })).toBe(
-      'EMPREITEIRO',
-    );
-    expect(
-      detectContractWorkflowType({ accountPlanName: 'CUSTO EMPREITEIROS' }),
-    ).toBe('EMPREITEIRO');
-    expect(
-      detectContractWorkflowType({ accountPlanName: 'PRESTACAO DE SERVICOS' }),
-    ).toBe('SERVICO');
+  it('requires explicit workflow classification even when an account plan is present', async () => {
+    const prisma = {
+      aethosContract: {
+        findFirst: jest.fn().mockResolvedValue({
+          ...contractRecord(),
+          accountPlanAethosId: '750',
+          workflow: null,
+        }),
+      },
+    };
+    const service = new ContractsService(prisma as never);
+
+    await expect(
+      service.updateWorkflow(
+        'contract-db-id',
+        { status: 'IN_PROGRESS', stages: [] },
+        'administrativo',
+      ),
+    ).rejects.toThrow('Classifique o contrato antes de preencher o fluxo');
   });
 
   it('uses the official seven-stage service flow and eight-stage contractor flow', () => {
@@ -121,7 +129,8 @@ describe('ContractsService', () => {
       }),
       expect.objectContaining({
         key: 'DISPONIBILIZACAO_JURIDICO',
-        targetDays: null,
+        targetDays: 1,
+        targetUnit: 'BUSINESS_DAYS',
       }),
       expect.objectContaining({
         key: 'CONTRATO_LIBERADO',
@@ -284,7 +293,7 @@ describe('ContractsService', () => {
     );
   });
 
-  it('filters contractor and service contracts by account plan', async () => {
+  it('filters contractor and service contracts by their explicit workflow classification', async () => {
     const prisma = {
       aethosContract: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -308,7 +317,7 @@ describe('ContractsService', () => {
         where: expect.objectContaining({
           AND: expect.arrayContaining([
             expect.objectContaining({
-              OR: expect.arrayContaining([{ accountPlanAethosId: '750' }]),
+              workflow: { is: { type: 'EMPREITEIRO' } },
             }),
           ]),
         }),
@@ -321,8 +330,7 @@ describe('ContractsService', () => {
         where: expect.objectContaining({
           AND: expect.arrayContaining([
             expect.objectContaining({
-              accountPlanName: { not: null },
-              NOT: expect.any(Object),
+              workflow: { is: { type: 'SERVICO' } },
             }),
           ]),
         }),

@@ -24,14 +24,25 @@ function monthlyDto(fleetPhotos = BASE_PHOTOS): CreateChecklistDto {
 describe('ChecklistService monthly fleet photos', () => {
   const checklistCreate = jest.fn();
   const checklistFindFirst = jest.fn();
+  const userFindUnique = jest.fn();
+  const vehicleFindFirst = jest.fn();
   const vehicleFindUnique = jest.fn();
+  const vehicleUpdateMany = jest.fn();
+  const queryRaw = jest.fn();
+  const transaction = jest.fn();
   const createForChecklistIfNeeded = jest.fn();
   const prisma = {
-    vehicle: { findUnique: vehicleFindUnique },
+    user: { findUnique: userFindUnique },
+    vehicle: {
+      findFirst: vehicleFindFirst,
+      findUnique: vehicleFindUnique,
+      updateMany: vehicleUpdateMany,
+    },
     checklist: {
       create: checklistCreate,
       findFirst: checklistFindFirst,
     },
+    $transaction: transaction,
   };
   const consentService = { createForChecklistIfNeeded };
   const service = new ChecklistService(prisma as any, consentService as any);
@@ -40,6 +51,31 @@ describe('ChecklistService monthly fleet photos', () => {
     jest.clearAllMocks();
     checklistFindFirst.mockResolvedValue(null);
     checklistCreate.mockResolvedValue({ id: 'checklist-1', items: [] });
+    userFindUnique.mockResolvedValue({
+      id: 'user-1',
+      role: 'supervisor_apoio',
+      active: true,
+      name: 'Usuario Teste',
+      email: 'teste@jr.com',
+    });
+    vehicleFindFirst.mockResolvedValue({
+      id: 'vehicle-1',
+      monthlyChecklistResponsible: { id: 'user-1', name: 'Usuario Teste' },
+    });
+    vehicleFindUnique.mockResolvedValue({
+      id: 'vehicle-1',
+      hasTimeClockDevice: false,
+      subgroup: null,
+    });
+    vehicleUpdateMany.mockResolvedValue({ count: 1 });
+    queryRaw.mockResolvedValue([]);
+    transaction.mockImplementation(async (callback) =>
+      callback({
+        $queryRaw: queryRaw,
+        checklist: { create: checklistCreate },
+        vehicle: { updateMany: vehicleUpdateMany },
+      }),
+    );
     createForChecklistIfNeeded.mockResolvedValue(null);
   });
 

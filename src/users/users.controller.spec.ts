@@ -33,7 +33,7 @@ describe('UsersController supervisor support profile', () => {
       await controller.findAll({ user: { role } }, 'manageable');
 
       expect(prismaUser.findMany).toHaveBeenCalledWith({
-        where: { role: { in: ['motorista'] } },
+        where: { active: true, role: { in: ['motorista'] } },
         orderBy: { name: 'asc' },
       });
     },

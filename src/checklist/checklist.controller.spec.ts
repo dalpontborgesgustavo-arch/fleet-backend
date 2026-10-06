@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ChecklistController } from './checklist.controller';
 import { ChecklistService } from './checklist.service';
 import { ChecklistConsentService } from './checklist-consent.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 describe('ChecklistController', () => {
   let controller: ChecklistController;
@@ -25,6 +26,10 @@ describe('ChecklistController', () => {
           useValue: {
             verify: jest.fn(),
           },
+        },
+        {
+          provide: PrismaService,
+          useValue: { user: { findUnique: jest.fn() } },
         },
         {
           provide: ChecklistConsentService,
