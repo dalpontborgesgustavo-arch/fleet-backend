@@ -1,14 +1,18 @@
+import { createHash } from 'node:crypto';
 import {
   Body,
   Controller,
   Get,
   Headers,
   Param,
+  PayloadTooLargeException,
   Post,
   Query,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import {
@@ -154,6 +158,27 @@ export class AethosIntegrationController {
   ) {
     this.service.assertToken(token, authorization);
     return this.costPurchasesSyncService.syncManagerialEntries(body);
+  }
+
+  @Get('cost-purchases/managerial-entry-items/reconciliation')
+  async managerialEntryReconciliation(
+    @Headers('x-aethos-sync-token') token: string | string[] | undefined,
+    @Headers('authorization') authorization: string | undefined,
+    @Res() response: Response,
+  ) {
+    this.service.assertToken(token, authorization);
+    const payload =
+      await this.costPurchasesSyncService.managerialEntryReconciliation();
+    const bytes = Buffer.from(JSON.stringify(payload), 'utf8');
+    if (bytes.length > 16 * 1024 * 1024) {
+      throw new PayloadTooLargeException('Inventario gerencial excede 16 MiB');
+    }
+    response.setHeader('Content-Type', 'application/json; charset=utf-8');
+    response.setHeader(
+      'X-Content-SHA256',
+      createHash('sha256').update(bytes).digest('hex'),
+    );
+    response.send(bytes);
   }
 
   @Post('cost-purchases/internal-consumption/sync')
@@ -429,3 +454,4 @@ export class AethosIntegrationController {
     return this.service.uploadContractAttachmentFile(idAnexoAethos, file);
   }
 }
+
