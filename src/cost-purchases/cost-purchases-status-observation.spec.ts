@@ -182,7 +182,9 @@ describe('observacao parcial asfalticos com CAS', () => {
     ).toHaveBeenCalledTimes(1);
     expect(value.tx.usinaSyncBatch.create).toHaveBeenCalledTimes(1);
     expect(value.tx.usinaSyncRun.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ syncMode: 'incremental' }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({ syncMode: 'incremental' }),
+      }),
     );
   });
 
@@ -228,6 +230,31 @@ describe('observacao parcial asfalticos com CAS', () => {
     expect(
       value.tx.costPurchaseManagerialEntryFact.updateMany,
     ).not.toHaveBeenCalled();
+  });
+
+  it('permite consultar recibo por runId sem repetir POST', async () => {
+    const service = new CostPurchasesSyncService({
+      usinaSyncRun: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'status-run',
+          status: 'COMPLETED',
+          generatedAt: updatedAt,
+        }),
+      },
+      usinaSyncBatch: {
+        findUnique: jest.fn().mockResolvedValue({
+          payloadHash: 'a'.repeat(64),
+          response: { ok: true, received: 1 },
+        }),
+      },
+    } as unknown as PrismaService);
+    await expect(
+      service.managerialAsphaltStatusObservationRun('status-20261008-001'),
+    ).resolves.toMatchObject({
+      status: 'COMPLETED',
+      payloadHash: 'a'.repeat(64),
+      receipt: { ok: true, received: 1 },
+    });
   });
 
   it('rejeita observacao anterior e mesmo instante com conteudo diferente', async () => {
