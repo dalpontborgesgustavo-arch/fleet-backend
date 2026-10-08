@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -20,6 +21,10 @@ import {
   normalizeCostPurchaseRows,
   protectsManagerialFactFromLegacyRow,
 } from './cost-purchases-sync.rules';
+import {
+  ASPHALT_STATUS_OBSERVATION_DATASET,
+  parseAsphaltStatusObservations,
+} from './cost-purchases-status-observation.rules';
 
 function snapshot(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(
@@ -31,6 +36,40 @@ function snapshot(value: unknown): Prisma.InputJsonValue {
 
 function monthStart(value: Date) {
   return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1));
+}
+
+type AsphaltMapping = {
+  id: string;
+  aethosItemId: number;
+  category: string;
+  validFrom: Date;
+  validTo: Date | null;
+  active: boolean;
+  deletedAt: Date | null;
+  updatedAt: Date;
+};
+
+function asphaltMappings(mappings: AsphaltMapping[]) {
+  const categories = new Set(['CAP', 'RR', 'SEMI_IMPRIMA']);
+  return mappings.filter((mapping) => categories.has(mapping.category));
+}
+
+function resolvedAsphaltMappings(mappings: AsphaltMapping[]) {
+  return asphaltMappings(mappings).map((mapping) => ({
+    sourceCompanyId: '1',
+    company: 'JR_CONSTRUCOES',
+    unit: 'AETHOS_ID_EMPRESA_1',
+    aethosItemId: String(mapping.aethosItemId),
+    mappingId: mapping.id,
+    version: mapping.updatedAt.toISOString(),
+    category: mapping.category,
+    validFrom: mapping.validFrom.toISOString().slice(0, 10),
+    validToInclusive: mapping.validTo
+      ? new Date(mapping.validTo.getTime() - 86400000)
+          .toISOString()
+          .slice(0, 10)
+      : null,
+  }));
 }
 
 @Injectable()
@@ -47,6 +86,396 @@ export class CostPurchasesSyncService {
 
   syncManagerialEntries(body: unknown) {
     return this.sync(body, COST_PURCHASE_MANAGERIAL_ENTRY_DATASET);
+  }
+
+  // A status observation never imports a fact or changes its financial data.
+  // The feed's row version and the map revision are checked in the write
+  // transaction so a stale source snapshot cannot overwrite a newer import.
+  async observeManagerialAsphaltStatuses(body: unknown) {
+    const input = parseAsphaltStatusObservations(body);
+    const payloadHash = hashCanonicalValue(body);
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const previous = await tx.usinaSyncRun.findUnique({
+            where: {
+              dataset_syncRunId: {
+                dataset: ASPHALT_STATUS_OBSERVATION_DATASET,
+                syncRunId: input.runId,
+              },
+            },
+          });
+          if (previous) {
+            const batch = await tx.usinaSyncBatch.findUnique({
+              where: {
+                runId_batchNumber: { runId: previous.id, batchNumber: 1 },
+              },
+            });
+            if (
+              !batch ||
+              batch.payloadHash !== payloadHash ||
+              previous.status !== 'COMPLETED'
+            ) {
+              throw new ConflictException(
+                'runId ja utilizado com outro payload',
+              );
+            }
+            return {
+              ...(batch.response as Record<string, unknown>),
+              replayed: true,
+            };
+          }
+          const now = new Date();
+          if (
+            input.snapshotAt.getTime() > now.getTime() + 5 * 60000 ||
+            now.getTime() - input.snapshotAt.getTime() > 60 * 60000
+          ) {
+            throw new ConflictException('snapshot de reconciliacao expirado');
+          }
+          const [mappings, changedMappingAudits] = await Promise.all([
+            tx.costPurchaseManagerialItemMapping.findMany({
+              orderBy: [{ aethosItemId: 'asc' }, { validFrom: 'asc' }],
+              select: {
+                id: true,
+                aethosItemId: true,
+                category: true,
+                validFrom: true,
+                validTo: true,
+                active: true,
+                deletedAt: true,
+                updatedAt: true,
+              },
+            }),
+            tx.costPurchaseManagerialItemMappingAudit.count({
+              where: { operation: { not: 'CREATE' } },
+            }),
+          ]);
+          if (
+            changedMappingAudits !== 0 ||
+            hashCanonicalValue(resolvedAsphaltMappings(mappings)) !==
+              input.mappingRevision
+          ) {
+            throw new ConflictException(
+              'mappingRevision desatualizada ou historico incompleto',
+            );
+          }
+          const facts = await tx.costPurchaseManagerialEntryFact.findMany({
+            where: {
+              source: 'AETHOS',
+              companyId: 'JR_CONSTRUCOES',
+              unitId: 'AETHOS_ID_EMPRESA_1',
+              dataset: COST_PURCHASE_MANAGERIAL_ENTRY_DATASET,
+              sourceRecordId: {
+                in: input.rows.map((row) => row.sourceRecordId),
+              },
+            },
+            include: { lastSeenRun: { select: { generatedAt: true } } },
+          });
+          if (facts.length !== input.rows.length) {
+            throw new ConflictException(
+              'observacao contem chave nao importada',
+            );
+          }
+          const bySource = new Map(
+            facts.map((fact) => [fact.sourceRecordId, fact]),
+          );
+          let changed = 0;
+          let unchanged = 0;
+          let deactivated = 0;
+          const dates: Date[] = [];
+          const prepared = input.rows.map((row) => {
+            const fact = bySource.get(row.sourceRecordId)!;
+            dates.push(fact.documentDate);
+            if (
+              fact.sourceHeaderId !== row.sourceHeaderId ||
+              fact.sourceItemId !== row.sourceItemId ||
+              fact.aethosItemId !== row.aethosItemId ||
+              fact.contentHash !== row.expectedContentHash ||
+              fact.updatedAt.getTime() !== row.expectedUpdatedAt.getTime()
+            ) {
+              throw new ConflictException(
+                `CAS divergente: ${row.sourceRecordId}`,
+              );
+            }
+            const matches = asphaltMappings(mappings).filter(
+              (map) =>
+                map.id === row.mappingId &&
+                map.aethosItemId === fact.aethosItemId &&
+                map.validFrom <= fact.documentDate &&
+                (!map.validTo || map.validTo > fact.documentDate),
+            );
+            if (matches.length !== 1) {
+              throw new ConflictException(
+                `mapa divergente: ${row.sourceRecordId}`,
+              );
+            }
+            const previousAt = fact.lastSeenRun?.generatedAt;
+            const sameStatus =
+              fact.sourceStatus === row.sourceStatus &&
+              fact.active === row.active &&
+              fact.sourceOrderId === row.orderId &&
+              fact.sourceOrderItemId === row.orderItemId &&
+              fact.sourceOrderStatus === row.orderStatus;
+            if (previousAt && previousAt > input.generatedAt) {
+              throw new ConflictException(
+                `observacao antiga: ${row.sourceRecordId}`,
+              );
+            }
+            if (
+              previousAt &&
+              previousAt.getTime() === input.generatedAt.getTime() &&
+              !sameStatus
+            ) {
+              throw new ConflictException(
+                `mesmo timestamp com status divergente: ${row.sourceRecordId}`,
+              );
+            }
+            const normalizationBase = {
+              sourceRecordId: fact.sourceRecordId,
+              sourceHeaderId: fact.sourceHeaderId,
+              sourceItemId: fact.sourceItemId,
+              documentDate: fact.documentDate.toISOString().slice(0, 10),
+              companyId: fact.companyId,
+              documentNumber: fact.documentNumber,
+              aethosItemId: fact.aethosItemId,
+              unit: fact.unit,
+              quantity: fact.quantity?.toString() ?? null,
+              totalValue: fact.totalValue.toString(),
+            };
+            const scope = {
+              company: fact.companyId,
+              unit: fact.unitId,
+              dateFrom: fact.documentDate,
+              dateTo: fact.documentDate,
+              aethosVehicleIds: [],
+            };
+            const baseline = normalizeCostPurchaseRows(
+              COST_PURCHASE_MANAGERIAL_ENTRY_DATASET,
+              [
+                {
+                  ...normalizationBase,
+                  status: fact.sourceStatus,
+                  active: fact.active,
+                  orderId: fact.sourceOrderId,
+                  orderItemId: fact.sourceOrderItemId,
+                  orderStatus: fact.sourceOrderStatus,
+                },
+              ],
+              scope,
+            );
+            if (
+              baseline.rejected.length ||
+              baseline.accepted[0]?.contentHash !== fact.contentHash
+            ) {
+              throw new ConflictException(
+                `hash financeiro divergente: ${row.sourceRecordId}`,
+              );
+            }
+            const normalized = normalizeCostPurchaseRows(
+              COST_PURCHASE_MANAGERIAL_ENTRY_DATASET,
+              [
+                {
+                  ...normalizationBase,
+                  status: row.sourceStatus,
+                  active: row.active,
+                  orderId: row.orderId,
+                  orderItemId: row.orderItemId,
+                  orderStatus: row.orderStatus,
+                },
+              ],
+              scope,
+            );
+            if (
+              normalized.rejected.length ||
+              normalized.accepted.length !== 1
+            ) {
+              throw new ConflictException(
+                `fato nao normalizavel: ${row.sourceRecordId}`,
+              );
+            }
+            const incoming = normalized.accepted[0];
+            const raw = fact.raw;
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+              throw new ConflictException(`raw ausente: ${row.sourceRecordId}`);
+            }
+            const nextRaw = {
+              ...(raw as Record<string, unknown>),
+              status: row.sourceStatus,
+              active: row.active,
+              orderId: row.orderId,
+              orderItemId: row.orderItemId,
+              orderStatus: row.orderStatus,
+            };
+            if ('FL_STATUS' in nextRaw) nextRaw.FL_STATUS = row.sourceStatus;
+            if ('sourceStatus' in nextRaw)
+              nextRaw.sourceStatus = row.sourceStatus;
+            if ('sourceOrderId' in nextRaw) nextRaw.sourceOrderId = row.orderId;
+            if ('sourceOrderItemId' in nextRaw)
+              nextRaw.sourceOrderItemId = row.orderItemId;
+            if ('sourceOrderStatus' in nextRaw)
+              nextRaw.sourceOrderStatus = row.orderStatus;
+            if ('ID_ORDEMCOMPRA' in nextRaw)
+              nextRaw.ID_ORDEMCOMPRA = row.orderId;
+            if ('ID_ORDEMCOMPRAITEM' in nextRaw)
+              nextRaw.ID_ORDEMCOMPRAITEM = row.orderItemId;
+            if ('ORDEMCOMPRA_FL_STATUS' in nextRaw)
+              nextRaw.ORDEMCOMPRA_FL_STATUS = row.orderStatus;
+            return { row, fact, sameStatus, incoming, nextRaw };
+          });
+          const scopeDateFrom = new Date(
+            Math.min(...dates.map((date) => date.getTime())),
+          );
+          const scopeDateTo = new Date(
+            Math.max(...dates.map((date) => date.getTime())),
+          );
+          const run = await tx.usinaSyncRun.create({
+            data: {
+              dataset: ASPHALT_STATUS_OBSERVATION_DATASET,
+              syncRunId: input.runId,
+              syncMode: 'incremental',
+              generatedAt: input.generatedAt,
+              scopeCompanyId: 'JR_CONSTRUCOES',
+              scopeUnitId: 'AETHOS_ID_EMPRESA_1',
+              scopeDateFrom,
+              scopeDateTo,
+              status: 'IN_PROGRESS',
+              scopeMetadata: {
+                snapshotId: input.snapshotId,
+                snapshotAt: input.snapshotAt.toISOString(),
+                mappingRevision: input.mappingRevision,
+              },
+            },
+          });
+          for (const { row, fact, sameStatus, incoming, nextRaw } of prepared) {
+            const result = await tx.costPurchaseManagerialEntryFact.updateMany({
+              where: {
+                id: fact.id,
+                updatedAt: row.expectedUpdatedAt,
+                contentHash: row.expectedContentHash,
+              },
+              data: {
+                sourceStatus: row.sourceStatus,
+                active: row.active,
+                sourceOrderId: row.orderId,
+                sourceOrderItemId: row.orderItemId,
+                sourceOrderStatus: row.orderStatus,
+                contentHash: incoming.contentHash,
+                raw: nextRaw as Prisma.InputJsonValue,
+                deactivatedAt: row.active ? null : (fact.deactivatedAt ?? now),
+                deactivationReason: row.active ? null : 'SOURCE_CANCELLED',
+                lastSeenRunId: run.id,
+                syncedAt: now,
+              },
+            });
+            if (result.count !== 1) {
+              throw new ConflictException(
+                `CAS concorrente: ${row.sourceRecordId}`,
+              );
+            }
+            if (sameStatus) {
+              unchanged += 1;
+            } else {
+              changed += 1;
+              if (fact.active && !row.active) deactivated += 1;
+              const updated =
+                await tx.costPurchaseManagerialEntryFact.findUniqueOrThrow({
+                  where: { id: fact.id },
+                });
+              await tx.costPurchaseManagerialEntryFactAudit.create({
+                data: {
+                  factId: fact.id,
+                  operation:
+                    fact.active && !row.active ? 'DEACTIVATE' : 'UPDATE',
+                  syncRunId: input.runId,
+                  beforeData: snapshot(fact),
+                  afterData: snapshot(updated),
+                },
+              });
+            }
+          }
+          const response = {
+            ok: true,
+            runId: input.runId,
+            snapshotId: input.snapshotId,
+            mappingRevision: input.mappingRevision,
+            payloadHash,
+            received: input.rows.length,
+            changed,
+            unchanged,
+            deactivated,
+            status: 'COMPLETED',
+            replayed: false,
+          };
+          await tx.usinaSyncBatch.create({
+            data: {
+              runId: run.id,
+              batchNumber: 1,
+              payloadHash,
+              receivedCount: input.rows.length,
+              acceptedCount: input.rows.length,
+              upsertedCount: changed,
+              unchangedCount: unchanged,
+              rejectedCount: 0,
+              deactivatedCount: deactivated,
+              response,
+            },
+          });
+          await tx.usinaSyncRun.update({
+            where: { id: run.id },
+            data: {
+              status: 'COMPLETED',
+              receivedCount: input.rows.length,
+              acceptedCount: input.rows.length,
+              upsertedCount: changed,
+              unchangedCount: unchanged,
+              deactivatedCount: deactivated,
+              lastBatchNumber: 1,
+              completedAt: now,
+            },
+          });
+          return response;
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          timeout: 30000,
+        },
+      );
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        (error.code === 'P2002' || error.code === 'P2034')
+      ) {
+        throw new ConflictException(
+          'observacao concorrente; consulte o recibo e tente novamente',
+        );
+      }
+      throw error;
+    }
+  }
+
+  async managerialAsphaltStatusObservationRun(runId: string) {
+    if (!runId || runId.length > 120) {
+      throw new BadRequestException('runId invalido');
+    }
+    const run = await this.prisma.usinaSyncRun.findUnique({
+      where: {
+        dataset_syncRunId: {
+          dataset: ASPHALT_STATUS_OBSERVATION_DATASET,
+          syncRunId: runId,
+        },
+      },
+    });
+    if (!run) throw new NotFoundException('runId nao encontrado');
+    const batch = await this.prisma.usinaSyncBatch.findUnique({
+      where: { runId_batchNumber: { runId: run.id, batchNumber: 1 } },
+    });
+    return {
+      runId,
+      status: run.status,
+      generatedAt: run.generatedAt.toISOString(),
+      payloadHash: batch?.payloadHash ?? null,
+      receipt: batch?.response ?? null,
+    };
   }
 
   // One authenticated, complete snapshot for the existing Aethos runner. Pages
@@ -118,25 +547,8 @@ export class CostPurchasesSyncService {
             'Historico de mapas alterado; reconciliacao integral requer revisao',
           );
         }
-        const asphaltCategories = new Set(['CAP', 'RR', 'SEMI_IMPRIMA']);
-        const asphaltMaps = mappings.filter((mapping) =>
-          asphaltCategories.has(mapping.category),
-        );
-        const resolvedMaps = asphaltMaps.map((mapping) => ({
-          sourceCompanyId: '1',
-          company: 'JR_CONSTRUCOES',
-          unit: 'AETHOS_ID_EMPRESA_1',
-          aethosItemId: String(mapping.aethosItemId),
-          mappingId: mapping.id,
-          version: mapping.updatedAt.toISOString(),
-          category: mapping.category,
-          validFrom: mapping.validFrom.toISOString().slice(0, 10),
-          validToInclusive: mapping.validTo
-            ? new Date(mapping.validTo.getTime() - 86400000)
-                .toISOString()
-                .slice(0, 10)
-            : null,
-        }));
+        const asphaltMaps = asphaltMappings(mappings);
+        const resolvedMaps = resolvedAsphaltMappings(mappings);
         const mapFor = (itemId: number, date: Date) =>
           asphaltMaps.find(
             (mapping) =>
