@@ -22,6 +22,7 @@ type InventoryPayload = {
   referenceYear?: unknown;
   referenceMonth?: unknown;
   measuredAt?: unknown;
+  notes?: unknown;
   items?: unknown;
 };
 
@@ -85,6 +86,17 @@ function parseMeasuredAt(value: unknown) {
     throw new BadRequestException('Data e hora da medição inválidas');
   }
   return parsed;
+}
+
+function parseInventoryNotes(value: unknown) {
+  if (value !== null && value !== undefined && typeof value !== 'string') {
+    throw new BadRequestException('Observação inválida');
+  }
+  const notes = typeof value === 'string' ? value.trim() : '';
+  if (notes.length > 2000) {
+    throw new BadRequestException('Observação deve ter até 2.000 caracteres');
+  }
+  return notes || null;
 }
 
 export function parseInventoryVolume(value: unknown) {
@@ -178,11 +190,27 @@ export class TopographyInventoryService {
     this.ensureAccess(actorRole, canAccessTopographyInventory);
     const company = parseCompany(query?.company);
     const { year, month } = parseReference(query?.year, query?.month);
+    const competenceDate = new Date(Date.UTC(year, month - 1, 1));
 
     const [materials, inventory, previousInventory, history] =
       await Promise.all([
         this.prisma.topographyInventoryMaterial.findMany({
-          where: { company, active: true },
+          where: {
+            company,
+            active: true,
+            OR: [
+              { availableFromCompetence: null },
+              { availableFromCompetence: { lte: competenceDate } },
+            ],
+            AND: [
+              {
+                OR: [
+                  { availableThroughCompetence: null },
+                  { availableThroughCompetence: { gte: competenceDate } },
+                ],
+              },
+            ],
+          },
           orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
         }),
         this.prisma.topographyInventory.findUnique({
@@ -377,13 +405,32 @@ export class TopographyInventoryService {
       payload?.referenceYear,
       payload?.referenceMonth,
     );
+    const competenceDate = new Date(Date.UTC(year, month - 1, 1));
     const measuredAt = parseMeasuredAt(payload?.measuredAt);
+    const notes = payload?.notes === undefined
+      ? undefined
+      : parseInventoryNotes(payload.notes);
     if (!Array.isArray(payload?.items)) {
       throw new BadRequestException('Itens do inventário inválidos');
     }
 
     const materials = await this.prisma.topographyInventoryMaterial.findMany({
-      where: { company, active: true },
+      where: {
+        company,
+        active: true,
+        OR: [
+          { availableFromCompetence: null },
+          { availableFromCompetence: { lte: competenceDate } },
+        ],
+        AND: [
+          {
+            OR: [
+              { availableThroughCompetence: null },
+              { availableThroughCompetence: { gte: competenceDate } },
+            ],
+          },
+        ],
+      },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
     const materialById = new Map(
@@ -474,6 +521,7 @@ export class TopographyInventoryService {
         },
         update: {
           measuredAt,
+          notes: notes === undefined ? previous?.notes ?? null : notes,
           updatedById: actorId,
           source: previous?.source?.startsWith('LEGACY_SPREADSHEET')
             ? 'SYSTEM'
@@ -484,6 +532,7 @@ export class TopographyInventoryService {
           referenceYear: year,
           referenceMonth: month,
           measuredAt,
+          notes: notes ?? null,
           source: 'SYSTEM',
           createdById: actorId,
           updatedById: actorId,
@@ -509,6 +558,7 @@ export class TopographyInventoryService {
             before: previous
               ? {
                   measuredAt: previous.measuredAt.toISOString(),
+                  notes: previous.notes,
                   items: previous.items.map((item) => ({
                     materialId: item.materialId,
                     volumeM3: decimal(item.volumeM3),
@@ -522,6 +572,7 @@ export class TopographyInventoryService {
               referenceYear: year,
               referenceMonth: month,
               measuredAt: measuredAt.toISOString(),
+              notes: notes === undefined ? previous?.notes ?? null : notes,
               items: calculatedItems.map((item) => ({
                 materialId: item.materialId,
                 volumeM3: decimal(item.volumeM3),
