@@ -181,6 +181,16 @@ export class AethosIntegrationController {
     response.send(bytes);
   }
 
+  @Post('cost-purchases/managerial-entry-items/status-observations')
+  observeManagerialAsphaltStatuses(
+    @Headers('x-aethos-sync-token') token: string | string[] | undefined,
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: unknown,
+  ) {
+    this.service.assertToken(token, authorization);
+    return this.costPurchasesSyncService.observeManagerialAsphaltStatuses(body);
+  }
+
   @Post('cost-purchases/internal-consumption/sync')
   syncCostPurchaseInternalConsumption(
     @Headers('x-aethos-sync-token') token: string | string[] | undefined,
