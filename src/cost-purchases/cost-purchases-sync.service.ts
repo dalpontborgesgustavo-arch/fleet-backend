@@ -161,6 +161,9 @@ export class CostPurchasesSyncService {
         competence: row.competence,
         documentNumber: row.documentNumber,
         sourceStatus: row.sourceStatus,
+        sourceOrderId: row.sourceOrderId,
+        sourceOrderItemId: row.sourceOrderItemId,
+        sourceOrderStatus: row.sourceOrderStatus,
         aethosItemId: row.aethosItemId,
         unit: row.unit,
         quantity: row.quantity,
@@ -169,7 +172,7 @@ export class CostPurchasesSyncService {
         raw: row.raw,
         active: row.active,
         deactivatedAt: row.active ? null : now,
-        deactivationReason: row.active ? null : 'SOURCE_INACTIVE',
+        deactivationReason: row.active ? null : 'SOURCE_CANCELLED',
         lastSeenRunId: runId,
         syncedAt: now,
       };
@@ -455,6 +458,7 @@ export class CostPurchasesSyncService {
         let unchanged = 0;
         let deactivated = 0;
         let quarantined = 0;
+        let staleIgnored = 0;
         for (const row of normalized.accepted) {
           const gasolineVolumeAnomaly =
             dataset === COST_PURCHASE_FUEL_DATASET &&
@@ -577,6 +581,34 @@ export class CostPurchasesSyncService {
               },
             },
           });
+          if (
+            dataset === COST_PURCHASE_MANAGERIAL_ENTRY_DATASET &&
+            existing?.lastSeenRunId
+          ) {
+            const previousRun = await tx.usinaSyncRun.findUnique({
+              where: { id: existing.lastSeenRunId },
+              select: { generatedAt: true },
+            });
+            if (
+              previousRun &&
+              previousRun.generatedAt.getTime() > envelope.generatedAt.getTime()
+            ) {
+              staleIgnored += 1;
+              continue;
+            }
+            if (
+              previousRun &&
+              previousRun.generatedAt.getTime() ===
+                envelope.generatedAt.getTime() &&
+              existing.lastSeenRunId !== run.id &&
+              (existing.contentHash !== row.contentHash ||
+                existing.active !== row.active)
+            ) {
+              throw new BadRequestException(
+                'cargas gerenciais com generatedAt igual e conteudo divergente',
+              );
+            }
+          }
           const data = this.factData(dataset, row, envelope, run.id, now);
           if (!existing) {
             const created = await delegates.fact.create({ data });
@@ -636,6 +668,23 @@ export class CostPurchasesSyncService {
             },
           });
           for (const fact of stale) {
+            if (
+              dataset === COST_PURCHASE_MANAGERIAL_ENTRY_DATASET &&
+              fact.lastSeenRunId
+            ) {
+              const previousRun = await tx.usinaSyncRun.findUnique({
+                where: { id: fact.lastSeenRunId },
+                select: { generatedAt: true },
+              });
+              if (
+                previousRun &&
+                previousRun.generatedAt.getTime() >
+                  envelope.generatedAt.getTime()
+              ) {
+                staleIgnored += 1;
+                continue;
+              }
+            }
             const updated = await delegates.fact.update({
               where: { id: fact.id },
               data: {
@@ -675,6 +724,7 @@ export class CostPurchasesSyncService {
           rejected: 0,
           deactivated,
           quarantined,
+          staleIgnored,
           finalized,
           runStatus: finalized ? 'COMPLETED' : 'IN_PROGRESS',
           reconciliation,
@@ -709,7 +759,12 @@ export class CostPurchasesSyncService {
         });
         return response;
       },
-      { timeout: 120000 },
+      {
+        timeout: 120000,
+        ...(dataset === COST_PURCHASE_MANAGERIAL_ENTRY_DATASET
+          ? { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+          : {}),
+      },
     );
   }
 }
