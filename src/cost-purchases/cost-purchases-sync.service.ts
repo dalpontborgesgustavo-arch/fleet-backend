@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { expireStaleUsinaSyncRuns } from '../aethos-integration/usina-sync-run-policy';
@@ -43,6 +47,194 @@ export class CostPurchasesSyncService {
 
   syncManagerialEntries(body: unknown) {
     return this.sync(body, COST_PURCHASE_MANAGERIAL_ENTRY_DATASET);
+  }
+
+  // One authenticated, complete snapshot for the existing Aethos runner. Pages
+  // live inside the response so no cursor can cross two PostgreSQL snapshots.
+  async managerialEntryReconciliation() {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const [facts, mappings, changedMappingAudits] = await Promise.all([
+          tx.costPurchaseManagerialEntryFact.findMany({
+            where: {
+              dataset: COST_PURCHASE_MANAGERIAL_ENTRY_DATASET,
+              companyId: 'JR_CONSTRUCOES',
+              unitId: 'AETHOS_ID_EMPRESA_1',
+            },
+            orderBy: [
+              { companyId: 'asc' },
+              { unitId: 'asc' },
+              { sourceRecordId: 'asc' },
+            ],
+            select: {
+              companyId: true,
+              unitId: true,
+              source: true,
+              sourceRecordId: true,
+              sourceHeaderId: true,
+              sourceItemId: true,
+              documentDate: true,
+              competence: true,
+              documentNumber: true,
+              aethosItemId: true,
+              sourceStatus: true,
+              sourceOrderId: true,
+              sourceOrderItemId: true,
+              sourceOrderStatus: true,
+              active: true,
+              deactivatedAt: true,
+              deactivationReason: true,
+              lastSeenRunId: true,
+              lastSeenRun: { select: { generatedAt: true } },
+              unit: true,
+              quantity: true,
+              totalValue: true,
+              contentHash: true,
+              syncedAt: true,
+              updatedAt: true,
+            },
+          }),
+          tx.costPurchaseManagerialItemMapping.findMany({
+            orderBy: [{ aethosItemId: 'asc' }, { validFrom: 'asc' }],
+            select: {
+              id: true,
+              aethosItemId: true,
+              category: true,
+              validFrom: true,
+              validTo: true,
+              active: true,
+              deletedAt: true,
+              updatedAt: true,
+            },
+          }),
+          tx.costPurchaseManagerialItemMappingAudit.count({
+            where: { operation: { not: 'CREATE' } },
+          }),
+        ]);
+        // The current JR history consists only of CREATE audits. Refuse a
+        // completeness claim if a later edit/delete requires replaying maps.
+        if (changedMappingAudits !== 0) {
+          throw new ConflictException(
+            'Historico de mapas alterado; reconciliacao integral requer revisao',
+          );
+        }
+        const asphaltCategories = new Set(['CAP', 'RR', 'SEMI_IMPRIMA']);
+        const asphaltMaps = mappings.filter((mapping) =>
+          asphaltCategories.has(mapping.category),
+        );
+        const resolvedMaps = asphaltMaps.map((mapping) => ({
+          sourceCompanyId: '1',
+          company: 'JR_CONSTRUCOES',
+          unit: 'AETHOS_ID_EMPRESA_1',
+          aethosItemId: String(mapping.aethosItemId),
+          mappingId: mapping.id,
+          version: mapping.updatedAt.toISOString(),
+          category: mapping.category,
+          validFrom: mapping.validFrom.toISOString().slice(0, 10),
+          validToInclusive: mapping.validTo
+            ? new Date(mapping.validTo.getTime() - 86400000)
+                .toISOString()
+                .slice(0, 10)
+            : null,
+        }));
+        const mapFor = (itemId: number, date: Date) =>
+          asphaltMaps.find(
+            (mapping) =>
+              mapping.aethosItemId === itemId &&
+              mapping.validFrom <= date &&
+              (!mapping.validTo || mapping.validTo > date),
+          );
+        const items = facts.flatMap((fact) => {
+          const mapping = mapFor(fact.aethosItemId, fact.documentDate);
+          if (!mapping) return [];
+          return [
+            {
+              company: fact.companyId,
+              unit: fact.unitId,
+              sourceCompanyId: '1',
+              sourceHeaderId: fact.sourceHeaderId,
+              sourceItemId: fact.sourceItemId,
+              sourceRecordId: fact.sourceRecordId,
+              active: fact.active,
+              totalValue: fact.totalValue.toString(),
+              documentDate: fact.documentDate.toISOString().slice(0, 10),
+              competence: fact.competence.toISOString().slice(0, 7),
+              contentHash: fact.contentHash,
+              rowVersion: `${fact.updatedAt.toISOString()}/${fact.contentHash}`,
+              updatedAt: fact.updatedAt.toISOString(),
+              observedAt: fact.lastSeenRun?.generatedAt.toISOString() ?? null,
+              mappingId: mapping.id,
+              aethosItemId: String(fact.aethosItemId),
+              quantity: fact.quantity?.toString() ?? null,
+              documentNumber: fact.documentNumber,
+              currentlyInAccount: mapping.active && !mapping.deletedAt,
+              unitOfMeasure: fact.unit,
+              sourceStatus: fact.sourceStatus,
+              orderId: fact.sourceOrderId,
+              orderItemId: fact.sourceOrderItemId,
+              orderStatus: fact.sourceOrderStatus,
+            },
+          ];
+        });
+        const snapshotAt = new Date().toISOString();
+        const mappingRevision = hashCanonicalValue(resolvedMaps);
+        const snapshotId = hashCanonicalValue({
+          snapshotAt,
+          mappingRevision,
+          items,
+        });
+        const pages: Array<{
+          pageNumber: number;
+          snapshotId: string;
+          rowCount: number;
+          rows: typeof items;
+        }> = [];
+        for (let offset = 0; offset < items.length; offset += 500) {
+          const rows = items.slice(offset, offset + 500);
+          pages.push({
+            pageNumber: pages.length + 1,
+            snapshotId,
+            rowCount: rows.length,
+            rows,
+          });
+        }
+        if (pages.length === 0)
+          pages.push({ pageNumber: 1, snapshotId, rowCount: 0, rows: [] });
+        return {
+          schemaVersion: 1,
+          kind: 'ASPHALTICS_RECURRING_FEED_PROPOSAL_V1',
+          complete: true,
+          snapshotId,
+          snapshotAt,
+          mappingRevision,
+          mappingCount: resolvedMaps.length,
+          mappings: resolvedMaps,
+          coverage: {
+            allImportedHistory: true,
+            inactive: true,
+            ineligible: true,
+            everClassifiedInAccount: true,
+            resolvedMappingHistory: true,
+          },
+          inventory: {
+            schemaVersion: 1,
+            dataset: COST_PURCHASE_MANAGERIAL_ENTRY_DATASET,
+            account: 'PRODUTOS_ASFALTICOS',
+            preimageDetail: 'INDIVIDUAL_FACTS',
+            complete: true,
+            snapshotId,
+            snapshotAt,
+            totalPages: pages.length,
+            totalRows: items.length,
+            pages,
+          },
+        };
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        timeout: 15000,
+      },
+    );
   }
 
   syncInternalConsumption(body: unknown) {
@@ -804,3 +996,4 @@ export class CostPurchasesSyncService {
     );
   }
 }
+
