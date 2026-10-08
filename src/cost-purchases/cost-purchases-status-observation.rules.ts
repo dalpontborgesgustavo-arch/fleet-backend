@@ -77,9 +77,9 @@ export function parseAsphaltStatusObservations(body: unknown) {
   if (
     !Array.isArray(input.rows) ||
     input.rows.length < 1 ||
-    input.rows.length > 500
+    input.rows.length > 100
   ) {
-    throw new BadRequestException('rows deve conter de 1 a 500 observacoes');
+    throw new BadRequestException('rows deve conter de 1 a 100 observacoes');
   }
   const seen = new Set<string>();
   const rows: AsphaltStatusObservationRow[] = input.rows.map((value, index) => {
