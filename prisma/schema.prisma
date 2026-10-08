@@ -1769,18 +1769,19 @@ model TopographyArrival {
 }
 
 model TopographyInventoryMaterial {
-  id                String                    @id @default(uuid())
-  company           String
-  name              String
-  aethosItemCode    String?
-  aethosDescription String?
-  density           Decimal?                  @db.Decimal(10, 4)
-  inputUnit         String                    @default("M3")
-  active            Boolean                   @default(true)
-  sortOrder         Int                       @default(0)
-  createdAt         DateTime                  @default(now())
-  updatedAt         DateTime                  @updatedAt
-  inventoryItems    TopographyInventoryItem[]
+  id                      String                    @id @default(uuid())
+  company                 String
+  name                    String
+  aethosItemCode          String?
+  aethosDescription       String?
+  density                 Decimal?                  @db.Decimal(10, 4)
+  inputUnit               String                    @default("M3")
+  availableFromCompetence DateTime?                 @db.Date
+  active                  Boolean                   @default(true)
+  sortOrder               Int                       @default(0)
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  inventoryItems          TopographyInventoryItem[]
 
   @@unique([company, name])
   @@unique([company, aethosItemCode])
@@ -4094,4 +4095,3 @@ model LucasFleetRevenueFactAudit {
   @@index([factId, changedAt])
   @@index([syncRunId])
 }
-

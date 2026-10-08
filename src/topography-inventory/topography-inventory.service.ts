@@ -178,11 +178,19 @@ export class TopographyInventoryService {
     this.ensureAccess(actorRole, canAccessTopographyInventory);
     const company = parseCompany(query?.company);
     const { year, month } = parseReference(query?.year, query?.month);
+    const competenceDate = new Date(Date.UTC(year, month - 1, 1));
 
     const [materials, inventory, previousInventory, history] =
       await Promise.all([
         this.prisma.topographyInventoryMaterial.findMany({
-          where: { company, active: true },
+          where: {
+            company,
+            active: true,
+            OR: [
+              { availableFromCompetence: null },
+              { availableFromCompetence: { lte: competenceDate } },
+            ],
+          },
           orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
         }),
         this.prisma.topographyInventory.findUnique({
@@ -377,13 +385,21 @@ export class TopographyInventoryService {
       payload?.referenceYear,
       payload?.referenceMonth,
     );
+    const competenceDate = new Date(Date.UTC(year, month - 1, 1));
     const measuredAt = parseMeasuredAt(payload?.measuredAt);
     if (!Array.isArray(payload?.items)) {
       throw new BadRequestException('Itens do inventário inválidos');
     }
 
     const materials = await this.prisma.topographyInventoryMaterial.findMany({
-      where: { company, active: true },
+      where: {
+        company,
+        active: true,
+        OR: [
+          { availableFromCompetence: null },
+          { availableFromCompetence: { lte: competenceDate } },
+        ],
+      },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
     const materialById = new Map(
