@@ -529,6 +529,37 @@ function normalizeManagerialEntryRow(value: unknown, scope: Scope) {
   };
 }
 
+export function hasManagerialOrderContract(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const row = raw as Record<string, unknown>;
+  return (
+    ['orderId', 'orderItemId', 'orderStatus'].every((key) =>
+      Object.prototype.hasOwnProperty.call(row, key),
+    ) ||
+    ['ID_ORDEMCOMPRA', 'ID_ORDEMCOMPRAITEM', 'ORDEMCOMPRA_FL_STATUS'].every(
+      (key) => Object.prototype.hasOwnProperty.call(row, key),
+    )
+  );
+}
+
+export function protectsManagerialFactFromLegacyRow(
+  existing: {
+    sourceOrderId: string | null;
+    sourceOrderItemId: string | null;
+    sourceOrderStatus: string | null;
+    sourceStatus: string;
+  },
+  incoming: { raw: unknown; sourceStatus: string },
+): boolean {
+  return (
+    !hasManagerialOrderContract(incoming.raw) &&
+    (existing.sourceOrderId != null ||
+      existing.sourceOrderItemId != null ||
+      existing.sourceOrderStatus != null ||
+      (existing.sourceStatus === 'C' && incoming.sourceStatus === 'F'))
+  );
+}
+
 function normalizeInternalConsumptionRow(value: unknown, scope: Scope) {
   const scoped = scopedRow(value, scope);
   const row = scoped.row;

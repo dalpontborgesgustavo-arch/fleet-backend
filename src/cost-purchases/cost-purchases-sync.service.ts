@@ -14,6 +14,7 @@ import {
   CostPurchaseSyncDataset,
   normalizeCostPurchaseEnvelope,
   normalizeCostPurchaseRows,
+  protectsManagerialFactFromLegacyRow,
 } from './cost-purchases-sync.rules';
 
 function snapshot(value: unknown): Prisma.InputJsonValue {
@@ -459,6 +460,7 @@ export class CostPurchasesSyncService {
         let deactivated = 0;
         let quarantined = 0;
         let staleIgnored = 0;
+        let legacyProtected = 0;
         for (const row of normalized.accepted) {
           const gasolineVolumeAnomaly =
             dataset === COST_PURCHASE_FUEL_DATASET &&
@@ -581,6 +583,39 @@ export class CostPurchasesSyncService {
               },
             },
           });
+          const managerialRow = row as typeof row & {
+            sourceStatus: string;
+            unit: string | null;
+          };
+          if (
+            dataset === COST_PURCHASE_MANAGERIAL_ENTRY_DATASET &&
+            existing &&
+            protectsManagerialFactFromLegacyRow(existing, managerialRow)
+          ) {
+            if (
+              managerialRow.sourceStatus === 'C' &&
+              existing.sourceStatus !== 'C'
+            ) {
+              throw new BadRequestException(
+                'nota cancelada exige contrato completo da ordem para preservar metadados existentes',
+              );
+            }
+            await delegates.fact.update({
+              where: { id: existing.id },
+              data: { lastSeenRunId: run.id, syncedAt: now },
+            });
+            legacyProtected += 1;
+            continue;
+          }
+          if (
+            dataset === COST_PURCHASE_MANAGERIAL_ENTRY_DATASET &&
+            existing?.unit &&
+            !managerialRow.unit
+          ) {
+            throw new BadRequestException(
+              'unidade de medida ausente em atualizacao gerencial existente',
+            );
+          }
           if (
             dataset === COST_PURCHASE_MANAGERIAL_ENTRY_DATASET &&
             existing?.lastSeenRunId
@@ -725,6 +760,7 @@ export class CostPurchasesSyncService {
           deactivated,
           quarantined,
           staleIgnored,
+          legacyProtected,
           finalized,
           runStatus: finalized ? 'COMPLETED' : 'IN_PROGRESS',
           reconciliation,

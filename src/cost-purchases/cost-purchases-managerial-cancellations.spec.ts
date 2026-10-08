@@ -2,6 +2,7 @@ import { COST_PURCHASE_MANAGERIAL_ENTRY_DATASET } from './cost-purchases.rules';
 import {
   normalizeCostPurchaseEnvelope,
   normalizeCostPurchaseRows,
+  protectsManagerialFactFromLegacyRow,
 } from './cost-purchases-sync.rules';
 import { managerialEntryIsEligible } from './cost-purchases-managerial.rules';
 
@@ -108,6 +109,48 @@ describe('cancelamentos do gerencial de compras', () => {
       orderStatus: 'I',
     });
     expect(result.rejected[0].reason).toContain('ID_ORDEMCOMPRAITEM');
+  });
+
+  it('protege status de OC conhecido contra payload legado sem os campos da ordem', () => {
+    const existing = {
+      sourceOrderId: '72938',
+      sourceOrderItemId: '1',
+      sourceOrderStatus: 'I',
+      sourceStatus: 'F',
+    };
+    expect(
+      protectsManagerialFactFromLegacyRow(existing, {
+        raw: baseRow,
+        sourceStatus: 'F',
+      }),
+    ).toBe(true);
+    expect(
+      protectsManagerialFactFromLegacyRow(existing, {
+        raw: { ...baseRow, orderId: null, orderItemId: null, orderStatus: null },
+        sourceStatus: 'F',
+      }),
+    ).toBe(false);
+  });
+
+  it('não reativa uma nota cancelada por replay legado, mas aceita contrato novo', () => {
+    const existing = {
+      sourceOrderId: null,
+      sourceOrderItemId: null,
+      sourceOrderStatus: null,
+      sourceStatus: 'C',
+    };
+    expect(
+      protectsManagerialFactFromLegacyRow(existing, {
+        raw: baseRow,
+        sourceStatus: 'F',
+      }),
+    ).toBe(true);
+    expect(
+      protectsManagerialFactFromLegacyRow(existing, {
+        raw: { ...baseRow, orderId: null, orderItemId: null, orderStatus: null },
+        sourceStatus: 'F',
+      }),
+    ).toBe(false);
   });
 
   it.each(['CAP', 'RR', 'SEMI_IMPRIMA'] as const)(
