@@ -21,6 +21,7 @@ import {
   COST_PURCHASE_MANAGERIAL_LINES,
   maintenanceIdentity,
   ManagerialCategory,
+  managerialEntryIsEligible,
   managerialEntryCategories,
   managerialMemoryFormula,
 } from './cost-purchases-managerial.rules';
@@ -2248,10 +2249,19 @@ export class CostPurchasesService {
       const monthEntryFacts = context.entryFacts.filter(
         (fact) => monthId(fact.competence) === competence,
       );
-      const mappedMonthEntryFacts = monthEntryFacts.map((fact) => ({
-        fact,
-        mapping: this.mappingFor(fact, context.mappings),
-      }));
+      const mappedMonthEntryFacts = monthEntryFacts
+        .map((fact) => ({
+          fact,
+          mapping: this.mappingFor(fact, context.mappings),
+        }))
+        .filter(
+          ({ fact, mapping }) =>
+            !mapping ||
+            managerialEntryIsEligible({
+              category: mapping.category as ManagerialCategory,
+              sourceOrderStatus: fact.sourceOrderStatus,
+            }),
+        );
       const entryCovered = context.runs.some(
         (run) =>
           run.dataset === COST_PURCHASE_MANAGERIAL_ENTRY_DATASET &&
@@ -2429,8 +2439,38 @@ export class CostPurchasesService {
       .filter(
         (entry) =>
           entry.mapping &&
-          entryCategories.has(entry.mapping.category as ManagerialCategory),
+          entryCategories.has(entry.mapping.category as ManagerialCategory) &&
+          managerialEntryIsEligible({
+            category: entry.mapping.category as ManagerialCategory,
+            sourceOrderStatus: entry.fact.sourceOrderStatus,
+          }),
       );
+    const excludedOrderFacts = monthEntryFacts
+      .map((fact) => ({
+        fact,
+        mapping: this.mappingFor(fact, context.mappings),
+      }))
+      .filter(
+        (entry) =>
+          entry.mapping &&
+          entryCategories.has(entry.mapping.category as ManagerialCategory) &&
+          !managerialEntryIsEligible({
+            category: entry.mapping.category as ManagerialCategory,
+            sourceOrderStatus: entry.fact.sourceOrderStatus,
+          }),
+      )
+      .map(({ fact }) => ({
+        sourceRecordId: fact.sourceRecordId,
+        documentNumber: fact.documentNumber,
+        sourceOrderId: fact.sourceOrderId,
+        sourceOrderItemId: fact.sourceOrderItemId,
+        sourceOrderStatus: fact.sourceOrderStatus,
+        totalValue: fact.totalValue.toFixed(2),
+        reason:
+          fact.sourceOrderStatus === 'I'
+            ? 'ORDEM_FINALIZADA'
+            : 'ORDEM_CANCELADA',
+      }));
     const entryFacts = mappedMonthEntryFacts.map(({ fact, mapping }) => ({
       sourceRecordId: fact.sourceRecordId,
       documentNumber: fact.documentNumber,
@@ -2521,6 +2561,8 @@ export class CostPurchasesService {
           : null,
       contributingEntryFacts: entryFacts,
       contributingEntryFactsCount: entryFacts.length,
+      excludedOrderFacts,
+      excludedOrderFactsCount: excludedOrderFacts.length,
       contributingPayableExpenseFacts: payableExpenseFacts,
       contributingPayableExpenseFactsCount: payableExpenseFacts.length,
       contributingFuelFacts,

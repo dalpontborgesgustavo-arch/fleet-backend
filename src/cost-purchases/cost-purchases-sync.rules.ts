@@ -455,8 +455,34 @@ function normalizeManagerialEntryRow(value: unknown, scope: Scope) {
     'status',
     10,
   ).toUpperCase();
-  if (sourceStatus !== 'F') {
-    throw new BadRequestException('status deve ser F');
+  if (sourceStatus !== 'F' && sourceStatus !== 'C') {
+    throw new BadRequestException('status deve ser F ou C');
+  }
+  if (sourceStatus === 'C' && row.active === undefined) {
+    throw new BadRequestException('active=false e obrigatorio para status C');
+  }
+  const active =
+    row.active === undefined ? true : optionalBoolean(row.active, 'active');
+  if (active !== (sourceStatus === 'F')) {
+    throw new BadRequestException('active diverge do status da nota');
+  }
+  const sourceOrderId = optionalText(
+    row.orderId ?? row.sourceOrderId ?? row.ID_ORDEMCOMPRA,
+    120,
+  );
+  const sourceOrderItemId = optionalText(
+    row.orderItemId ?? row.sourceOrderItemId ?? row.ID_ORDEMCOMPRAITEM,
+    120,
+  );
+  const sourceOrderStatus =
+    optionalText(
+      row.orderStatus ?? row.sourceOrderStatus ?? row.ORDEMCOMPRA_FL_STATUS,
+      10,
+    )?.toUpperCase() ?? null;
+  if (sourceOrderStatus && (!sourceOrderId || !sourceOrderItemId)) {
+    throw new BadRequestException(
+      'orderStatus exige ID_ORDEMCOMPRA e ID_ORDEMCOMPRAITEM oficiais',
+    );
   }
   const aethosItemId = positiveInteger(
     row.aethosItemId ?? row.ID_ITEM,
@@ -480,12 +506,15 @@ function normalizeManagerialEntryRow(value: unknown, scope: Scope) {
     ),
     documentNumber: optionalText(row.documentNumber ?? row.NR_NOTA, 100),
     sourceStatus,
+    sourceOrderId,
+    sourceOrderItemId,
+    sourceOrderStatus,
     aethosItemId,
     unit: optionalText(row.unit ?? row.UNIDADE, 40),
     quantity,
     totalValue,
     raw,
-    active: row.active === undefined ? true : Boolean(row.active),
+    active,
   };
   return {
     ...normalized,

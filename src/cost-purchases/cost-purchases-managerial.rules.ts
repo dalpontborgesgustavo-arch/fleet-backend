@@ -46,6 +46,24 @@ export type ManagerialCategory =
   | 'SEMI_IMPRIMA'
   | 'DIESEL';
 
+const ASPHALT_CATEGORIES = new Set<ManagerialCategory>([
+  'CAP',
+  'RR',
+  'SEMI_IMPRIMA',
+]);
+const INELIGIBLE_ASPHALT_ORDER_STATUSES = new Set(['I', 'C']);
+
+export function managerialEntryIsEligible(input: {
+  category: ManagerialCategory;
+  sourceOrderStatus: string | null;
+}) {
+  return !(
+    ASPHALT_CATEGORIES.has(input.category) &&
+    input.sourceOrderStatus !== null &&
+    INELIGIBLE_ASPHALT_ORDER_STATUSES.has(input.sourceOrderStatus)
+  );
+}
+
 export type ManagerialMonthInput = {
   entryCovered: boolean;
   entryValues: Partial<Record<ManagerialCategory, Prisma.Decimal>>;
@@ -95,7 +113,7 @@ export function managerialMemoryFormula(code: string) {
     case 'USINA':
       return 'CAL + DOP sem documentos duplicados';
     case 'PRODUTOS_ASFALTICOS':
-      return 'CAP + RR + SEMI_IMPRIMA';
+      return 'CAP + RR + SEMI_IMPRIMA; exclui ordens finalizadas ou canceladas';
     case 'DIESEL_PRECO_MEDIO':
       return 'valor de diesel / litros de diesel';
     case 'GASOLINA_PRECO_MEDIO':

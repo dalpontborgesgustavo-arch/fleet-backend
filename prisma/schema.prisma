@@ -2502,6 +2502,9 @@ model CostPurchaseManagerialEntryFact {
   competence         DateTime                               @db.Date
   documentNumber     String?
   sourceStatus       String
+  sourceOrderId      String?
+  sourceOrderItemId  String?
+  sourceOrderStatus  String?
   aethosItemId       Int
   unit               String?
   quantity           Decimal?                               @db.Decimal(24, 12)
