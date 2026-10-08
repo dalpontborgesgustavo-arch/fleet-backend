@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -383,7 +384,8 @@ export class CostPurchasesSyncService {
               await tx.costPurchaseManagerialEntryFactAudit.create({
                 data: {
                   factId: fact.id,
-                  operation: row.active ? 'UPDATE' : 'DEACTIVATE',
+                  operation:
+                    fact.active && !row.active ? 'DEACTIVATE' : 'UPDATE',
                   syncRunId: input.runId,
                   beforeData: snapshot(fact),
                   afterData: snapshot(updated),
@@ -396,6 +398,7 @@ export class CostPurchasesSyncService {
             runId: input.runId,
             snapshotId: input.snapshotId,
             mappingRevision: input.mappingRevision,
+            payloadHash,
             received: input.rows.length,
             changed,
             unchanged,
@@ -448,6 +451,31 @@ export class CostPurchasesSyncService {
       }
       throw error;
     }
+  }
+
+  async managerialAsphaltStatusObservationRun(runId: string) {
+    if (!runId || runId.length > 120) {
+      throw new BadRequestException('runId invalido');
+    }
+    const run = await this.prisma.usinaSyncRun.findUnique({
+      where: {
+        dataset_syncRunId: {
+          dataset: ASPHALT_STATUS_OBSERVATION_DATASET,
+          syncRunId: runId,
+        },
+      },
+    });
+    if (!run) throw new NotFoundException('runId nao encontrado');
+    const batch = await this.prisma.usinaSyncBatch.findUnique({
+      where: { runId_batchNumber: { runId: run.id, batchNumber: 1 } },
+    });
+    return {
+      runId,
+      status: run.status,
+      generatedAt: run.generatedAt.toISOString(),
+      payloadHash: batch?.payloadHash ?? null,
+      receipt: batch?.response ?? null,
+    };
   }
 
   // One authenticated, complete snapshot for the existing Aethos runner. Pages
