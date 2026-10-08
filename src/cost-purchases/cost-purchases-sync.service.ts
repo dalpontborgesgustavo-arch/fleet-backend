@@ -331,7 +331,7 @@ export class CostPurchasesSyncService {
             data: {
               dataset: ASPHALT_STATUS_OBSERVATION_DATASET,
               syncRunId: input.runId,
-              syncMode: 'status-observation',
+              syncMode: 'incremental',
               generatedAt: input.generatedAt,
               scopeCompanyId: 'JR_CONSTRUCOES',
               scopeUnitId: 'AETHOS_ID_EMPRESA_1',
@@ -434,7 +434,7 @@ export class CostPurchasesSyncService {
         },
         {
           isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-          timeout: 15000,
+          timeout: 30000,
         },
       );
     } catch (error) {
