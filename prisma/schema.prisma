@@ -1777,6 +1777,7 @@ model TopographyInventoryMaterial {
   density                 Decimal?                  @db.Decimal(10, 4)
   inputUnit               String                    @default("M3")
   availableFromCompetence DateTime?                 @db.Date
+  availableThroughCompetence DateTime?               @db.Date
   active                  Boolean                   @default(true)
   sortOrder               Int                       @default(0)
   createdAt               DateTime                  @default(now())
@@ -1796,6 +1797,7 @@ model TopographyInventory {
   referenceMonth Int
   measuredAt     DateTime
   source         String                       @default("SYSTEM")
+  notes          String?
   createdById    String?
   updatedById    String?
   createdAt      DateTime                     @default(now())
