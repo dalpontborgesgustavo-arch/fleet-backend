@@ -181,6 +181,9 @@ describe('observacao parcial asfalticos com CAS', () => {
       value.tx.costPurchaseManagerialEntryFactAudit.create,
     ).toHaveBeenCalledTimes(1);
     expect(value.tx.usinaSyncBatch.create).toHaveBeenCalledTimes(1);
+    expect(value.tx.usinaSyncRun.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ syncMode: 'incremental' }) }),
+    );
   });
 
   it('rejeita CAS divergente antes de criar run ou alterar fatos', async () => {
