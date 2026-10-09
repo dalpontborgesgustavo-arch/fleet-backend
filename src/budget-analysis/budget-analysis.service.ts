@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 const READ_ROLES = new Set(['admin', 'gestor', 'ceo']);
 const WRITE_ROLES = new Set(['admin', 'gestor', 'ceo']);
+const SSMA_ROLES = new Set(['admin', 'ssma']);
 const DEFAULT_YEAR = 2026;
 const DEFAULT_BASE_REVENUE = 21_000_000;
 const DEFAULT_RESPONSIBLE = 'Sem Responsável';
@@ -17,6 +18,257 @@ type ForecastFilter = 'without_forecast' | 'only_forecast' | 'all';
 type FinancingFilter = 'include' | 'exclude';
 type DepreciationFilter = 'include' | 'exclude';
 type BudgetCompany = 'PRUMARE' | 'PEDRAFORTE' | 'JR_CONSTRUCOES';
+type SsmaCompany = 'PEDRAFORTE' | 'JR_CONSTRUCOES';
+type SsmaCategory = 'SAFETY' | 'GUARDING' | 'ENVIRONMENT';
+
+// Explicit account allowlist prevents a similarly named financial plan from
+// leaking into SSMA. Shared plans have a budget owner but company-scoped actuals.
+const SSMA_ACCOUNTS: Record<
+  SsmaCompany,
+  ReadonlyArray<{
+    code: string;
+    label: string;
+    category: SsmaCategory;
+    budgeted: boolean;
+  }>
+> = {
+  JR_CONSTRUCOES: [
+    {
+      code: '1221',
+      label: 'Almoxarifado SMS',
+      category: 'SAFETY',
+      budgeted: true,
+    },
+    {
+      code: '1445',
+      label: 'SMS - EPI e uniformes',
+      category: 'SAFETY',
+      budgeted: true,
+    },
+    {
+      code: '1492',
+      label: 'SMS - materiais diversos',
+      category: 'SAFETY',
+      budgeted: true,
+    },
+    {
+      code: '393',
+      label: 'Exames e laudos de funcionários',
+      category: 'SAFETY',
+      budgeted: true,
+    },
+    {
+      code: '622',
+      label: 'Laudos técnicos de segurança do trabalho',
+      category: 'SAFETY',
+      budgeted: true,
+    },
+    {
+      code: '1456',
+      label: 'Acidente de trabalho',
+      category: 'SAFETY',
+      budgeted: true,
+    },
+    {
+      code: '1545',
+      label: 'Usina 2 - exames e laudos médicos',
+      category: 'SAFETY',
+      budgeted: true,
+    },
+    {
+      code: '1578',
+      label: 'Usina - bombeiro',
+      category: 'SAFETY',
+      budgeted: true,
+    },
+    {
+      code: '1549',
+      label: 'Projeto de bombeiros',
+      category: 'SAFETY',
+      budgeted: true,
+    },
+    {
+      code: '181',
+      label: 'Taxa de bombeiros',
+      category: 'SAFETY',
+      budgeted: true,
+    },
+    {
+      code: '1113',
+      label: 'Usina - vigilância',
+      category: 'GUARDING',
+      budgeted: true,
+    },
+    {
+      code: '1624',
+      label: 'Usina 2 - vigilância',
+      category: 'GUARDING',
+      budgeted: true,
+    },
+    {
+      code: '825',
+      label: 'Areal Esplanada - vigilância',
+      category: 'GUARDING',
+      budgeted: true,
+    },
+    {
+      code: '826',
+      label: 'Obras - vigilância',
+      category: 'GUARDING',
+      budgeted: true,
+    },
+    {
+      code: '851',
+      label: 'Vigilância geral',
+      category: 'GUARDING',
+      budgeted: true,
+    },
+    {
+      code: '1166',
+      label: 'Obras - manifesto de transporte de resíduos',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '1206',
+      label: 'Jazida RS - renovação de licenciamento',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '1303',
+      label: 'Frota - licença ambiental',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '1387',
+      label: 'Licença ambiental de tanque de combustível',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '1539',
+      label: 'Usina 2 - licenciamento',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '1596',
+      label: 'Usina 2 - coleta de resíduos',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '186',
+      label: 'Anuidade IBAMA',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '221',
+      label: 'Urussanga Velha - licenciamento e taxas ambientais',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '398',
+      label: 'Renovação ambiental FATMA/DNPM',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '448',
+      label: 'Usina - licenciamento',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '662',
+      label: 'Pedreira Forquilhinha - taxas DNPM/FATMA',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '802',
+      label: 'Areal Esplanada - licenciamento',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '866',
+      label: 'Usina - coleta de resíduos',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '898',
+      label: 'Requerimentos de áreas DNPM/FATMA',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '994',
+      label: 'Frota - coleta de resíduos',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+  ],
+  PEDRAFORTE: [
+    {
+      code: '1116',
+      label: 'Exames e laudos de funcionários',
+      category: 'SAFETY',
+      budgeted: true,
+    },
+    {
+      code: '1467',
+      label: 'Acidente de trabalho',
+      category: 'SAFETY',
+      budgeted: true,
+    },
+    {
+      code: '1445',
+      label: 'SMS - EPI e uniformes',
+      category: 'SAFETY',
+      budgeted: false,
+    },
+    {
+      code: '1126',
+      label: 'Pedraforte - vigilância',
+      category: 'GUARDING',
+      budgeted: true,
+    },
+    {
+      code: '639',
+      label: 'Pedraforte - vigilância',
+      category: 'GUARDING',
+      budgeted: true,
+    },
+    {
+      code: '851',
+      label: 'Vigilância geral',
+      category: 'GUARDING',
+      budgeted: false,
+    },
+    {
+      code: '822',
+      label: 'Pedraforte - licenciamento',
+      category: 'ENVIRONMENT',
+      budgeted: true,
+    },
+    {
+      code: '186',
+      label: 'Anuidade IBAMA',
+      category: 'ENVIRONMENT',
+      budgeted: false,
+    },
+  ],
+};
+const SSMA_COMPANY_CODES: Record<SsmaCompany, string> = {
+  JR_CONSTRUCOES: '1',
+  PEDRAFORTE: '4',
+};
 
 const COMPANY_LABELS: Record<BudgetCompany, string> = {
   PRUMARE: 'Prumare',
@@ -387,6 +639,159 @@ function planAccountWhereByDateBasis(
 @Injectable()
 export class BudgetAnalysisService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async getSsmaOverview(
+    query: Record<string, unknown>,
+    actorRole?: string | null,
+  ) {
+    if (!SSMA_ROLES.has(normalizeRole(actorRole))) {
+      throw new ForbiddenException(
+        'Sem permissao para o orcamento de seguranca',
+      );
+    }
+
+    const company = coerceText(query.company || 'JR_CONSTRUCOES').toUpperCase();
+    if (company !== 'JR_CONSTRUCOES' && company !== 'PEDRAFORTE') {
+      throw new BadRequestException('Empresa invalida');
+    }
+    const selectedCompany = company as SsmaCompany;
+    const year = normalizeYear(query.year);
+    const month = normalizeMonth(query.month);
+    const competencia = normalizeCompetencia(year, month);
+    const accounts = SSMA_ACCOUNTS[selectedCompany];
+    const codes = accounts.map((account) => account.code);
+    const budgetCodes = accounts
+      .filter((account) => account.budgeted)
+      .map((account) => account.code);
+    const sharedCodes = accounts
+      .filter((account) => !account.budgeted)
+      .map((account) => account.code);
+    const actualScopeWhere: Prisma.AethosPlanoContaCostWhereInput =
+      selectedCompany === 'PEDRAFORTE'
+        ? {
+            OR: [
+              {
+                codigoPlanoConta: { in: budgetCodes },
+                // Pedraforte-specific accounts also occur in the JR ledger.
+                codigoEmpresa: { in: ['1', '4'] },
+              },
+              {
+                codigoPlanoConta: { in: sharedCodes },
+                codigoEmpresa: '4',
+              },
+            ],
+          }
+        : {
+            codigoEmpresa: SSMA_COMPANY_CODES[selectedCompany],
+            codigoPlanoConta: { in: codes },
+          };
+    const version = await this.findVersion(year);
+    const [lines, actuals, lastSync] = await Promise.all([
+      this.prisma.budgetLine.findMany({
+        where: {
+          versionId: version.id,
+          active: true,
+          idSubgrupo: { in: budgetCodes },
+        },
+        select: {
+          idSubgrupo: true,
+          monthlyCost: true,
+          monthlyBudgets: {
+            where: { year, month },
+            select: { amount: true },
+            take: 1,
+          },
+        },
+      }),
+      this.prisma.aethosPlanoContaCost.groupBy({
+        by: ['codigoPlanoConta'],
+        where: {
+          AND: [
+            planAccountWhereByDateBasis(
+              year,
+              month,
+              competencia,
+              'lancamento',
+              'without_forecast',
+            ),
+            actualScopeWhere,
+          ],
+        },
+        _sum: { valorCusto: true },
+      }),
+      this.prisma.aethosPlanoContaCost.findFirst({
+        where: {
+          active: true,
+          AND: [actualScopeWhere],
+        },
+        orderBy: { syncedAt: 'desc' },
+        select: { syncedAt: true },
+      }),
+    ]);
+
+    const budgetByCode = new Map(
+      lines.map((line) => [
+        line.idSubgrupo,
+        decimalToNumber(line.monthlyBudgets[0]?.amount ?? line.monthlyCost),
+      ]),
+    );
+    const actualByCode = new Map(
+      actuals.map((actual) => [
+        actual.codigoPlanoConta,
+        decimalToNumber(actual._sum.valorCusto),
+      ]),
+    );
+    const rows = accounts
+      .filter(
+        (account) =>
+          budgetByCode.has(account.code) || actualByCode.has(account.code),
+      )
+      .map((account) => {
+        const budget = roundMoney(budgetByCode.get(account.code) || 0);
+        const realized = roundMoney(actualByCode.get(account.code) || 0);
+        return {
+          code: account.code,
+          description: account.label,
+          category: account.category,
+          hasBudget: budgetByCode.has(account.code),
+          budget,
+          realized,
+          variance: roundMoney(budget - realized),
+          percentUsed:
+            budget > 0
+              ? Math.round((realized / budget) * 1000) / 10
+              : realized > 0
+                ? 100
+                : 0,
+        };
+      });
+    const budget = roundMoney(rows.reduce((sum, row) => sum + row.budget, 0));
+    const realized = roundMoney(
+      rows.reduce((sum, row) => sum + row.realized, 0),
+    );
+
+    return {
+      year,
+      month,
+      company: selectedCompany,
+      companyLabel: COMPANY_LABELS[selectedCompany],
+      dateBasis: 'lancamento' as const,
+      forecastFilter: 'without_forecast' as const,
+      lastSync: lastSync?.syncedAt.toISOString() || null,
+      summary: {
+        budget,
+        realized,
+        variance: roundMoney(budget - realized),
+        percentUsed:
+          budget > 0
+            ? Math.round((realized / budget) * 1000) / 10
+            : realized > 0
+              ? 100
+              : 0,
+      },
+      rows,
+    };
+  }
 
   async getOverview(query: Record<string, unknown>, actorRole?: string | null) {
     ensureReadAccess(actorRole);
