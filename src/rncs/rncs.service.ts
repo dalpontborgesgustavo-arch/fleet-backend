@@ -3172,6 +3172,7 @@ export class RncsService {
   private ensureCanCreateRnc(role: string | null | undefined, type: RncType) {
     if (isEngineeringRole(role)) return;
     const normalized = normalizeRole(role);
+    if (normalized === 'admin' || normalized === 'administrador') return;
     if (
       type === RncType.INTERNAL &&
       normalized &&

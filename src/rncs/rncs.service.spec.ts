@@ -281,6 +281,19 @@ describe('RncsService consultant internal RNC test access', () => {
       (service as any).ensureCanCreateRnc('consultor', 'WORK'),
     ).toThrow('Sem permissao para criar este tipo de RNC');
   });
+
+  it.each(['admin', 'administrador'])(
+    'allows %s to create all RNC types',
+    (role) => {
+      const service = new RncsService({} as any, {} as any, {} as any, {} as any);
+
+      for (const type of ['EXTERNAL', 'WORK', 'INTERNAL']) {
+        expect(() =>
+          (service as any).ensureCanCreateRnc(role, type),
+        ).not.toThrow();
+      }
+    },
+  );
 });
 
 describe('RncsService internal RNC work fields', () => {
