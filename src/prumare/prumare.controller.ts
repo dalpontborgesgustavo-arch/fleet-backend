@@ -139,6 +139,19 @@ export class PrumareController {
     );
   }
 
+  @Get('enterprises/:enterpriseId/simulations')
+  findSimulations(
+    @Req() req: any,
+    @Param('enterpriseId') enterpriseId: string,
+    @Query('lotId') lotId?: string,
+  ) {
+    return this.prumareService.findSimulations(
+      enterpriseId,
+      lotId,
+      req.user?.role,
+    );
+  }
+
   @Post('enterprises/:enterpriseId/simulate-table')
   simulateTable(
     @Req() req: any,

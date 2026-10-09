@@ -1390,21 +1390,66 @@ export class PrumareService {
       throw new ForbiddenException('Sem permissao para salvar simulacoes');
     }
 
-    if (data?.save && data?.enterpriseId) {
+    if (data?.save) {
+      const enterpriseId = optionalText(data?.enterpriseId);
+      if (!enterpriseId) {
+        throw new BadRequestException(
+          'Selecione um empreendimento para salvar',
+        );
+      }
+      await this.ensureEnterprise(enterpriseId);
+      const lotId = optionalText(data?.lotId);
+      if (lotId) {
+        const lot = await this.ensureLot(lotId);
+        if (lot.enterpriseId !== enterpriseId) {
+          throw new BadRequestException('Lote de outro empreendimento');
+        }
+      }
       await this.prisma.prumareSimulation.create({
         data: {
-          enterpriseId: data.enterpriseId,
-          lotId: optionalText(data?.lotId),
+          enterpriseId,
+          lotId,
           kind: 'PRICE',
           title: optionalText(data?.title),
           createdBy: actorId ?? null,
-          inputs: data as Prisma.InputJsonValue,
+          inputs: {
+            totalValue,
+            downPayment,
+            installments,
+            monthlyRatePercent,
+            annualReinforcement,
+          },
           results: results as Prisma.InputJsonValue,
         },
       });
     }
 
     return results;
+  }
+
+  async findSimulations(
+    enterpriseId: string,
+    lotId?: string,
+    role?: string | null,
+  ) {
+    ensureManageAccess(role);
+    await this.ensureEnterprise(enterpriseId);
+    if (lotId) {
+      const lot = await this.ensureLot(lotId);
+      if (lot.enterpriseId !== enterpriseId) {
+        throw new BadRequestException('Lote de outro empreendimento');
+      }
+    }
+
+    return this.prisma.prumareSimulation.findMany({
+      where: {
+        enterpriseId,
+        kind: 'PRICE',
+        ...(lotId ? { lotId } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+    });
   }
 
   async simulateTable(
