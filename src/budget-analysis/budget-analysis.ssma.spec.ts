@@ -38,6 +38,29 @@ describe('SSMA security budget', () => {
       findFirst: jest.fn().mockResolvedValue({
         syncedAt: new Date('2026-10-09T12:00:00Z'),
       }),
+      aggregate: jest.fn().mockResolvedValue({
+        _count: { _all: 2 },
+        _sum: { valorCusto: 300 },
+      }),
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'cost-1',
+          idLancamento: 'aethos-1',
+          nomeEmpresa: 'JR Construcoes',
+          dataBaseLancamento: new Date('2026-09-15T00:00:00Z'),
+          dataLancamento: new Date('2026-09-16T00:00:00Z'),
+          numeroNotaFiscal: '123',
+          dataEmissaoNotaFiscal: new Date('2026-09-10T00:00:00Z'),
+          observacaoLancamento: 'Exame ocupacional',
+          observacaoNotaFiscal: null,
+          valorCusto: 150,
+          raw: {
+            nomeObra: 'Usina',
+            nomeCentroCusto: 'SSMA',
+            confidentialExtra: 'never-return',
+          },
+        },
+      ]),
     },
   });
 
@@ -193,5 +216,103 @@ describe('SSMA security budget', () => {
       }),
     ]);
     expect(result.rows.some((row) => row.code === '826')).toBe(false);
+  });
+
+  it('returns only paginated JR expense details under the same scope as the overview', async () => {
+    const prisma = makePrisma();
+    const service = new BudgetAnalysisService(prisma as never);
+
+    const result = await service.getSsmaActuals(
+      { company: 'JR_CONSTRUCOES', year: 2026, month: 9, code: '393', page: 1 },
+      'ssma',
+    );
+
+    const expectedWhere = {
+      AND: [
+        expect.objectContaining({
+          active: true,
+          competencia: '2026-09',
+          AND: [{ OR: [{ status: null }, { status: { not: 'APR' } }] }],
+        }),
+        expect.objectContaining({
+          codigoEmpresa: '1',
+          codigoPlanoConta: expect.objectContaining({ in: expect.arrayContaining(['393']) }),
+        }),
+        { codigoPlanoConta: '393' },
+      ],
+    };
+    expect(prisma.aethosPlanoContaCost.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expectedWhere }),
+    );
+    expect(prisma.aethosPlanoContaCost.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expectedWhere, skip: 0, take: 50 }),
+    );
+    expect(result.total).toBe(300);
+    expect(result.count).toBe(2);
+    expect(result.rows).toEqual([
+      expect.objectContaining({
+        idLancamento: 'aethos-1',
+        dataReferencia: '2026-09-15T00:00:00.000Z',
+        observacaoLancamento: 'Exame ocupacional',
+        obra: 'Usina',
+        centroCusto: 'SSMA',
+        valor: 150,
+      }),
+    ]);
+    expect(JSON.stringify(result)).not.toMatch(/confidentialExtra|revenue|scenario|faturamento/i);
+  });
+
+  it('keeps Pedraforte dedicated and shared-account scoping in the detail query', async () => {
+    const prisma = makePrisma();
+    const service = new BudgetAnalysisService(prisma as never);
+
+    await service.getSsmaActuals(
+      { company: 'PEDRAFORTE', year: 2026, month: 9, code: '1126', page: 2 },
+      'admin',
+    );
+    expect(prisma.aethosPlanoContaCost.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        skip: 50,
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              OR: expect.arrayContaining([
+                expect.objectContaining({
+                  codigoEmpresa: { in: ['1', '4'] },
+                  codigoPlanoConta: expect.objectContaining({ in: expect.arrayContaining(['1126']) }),
+                }),
+                expect.objectContaining({
+                  codigoEmpresa: '4',
+                  codigoPlanoConta: { in: ['1445', '851', '186'] },
+                }),
+              ]),
+            }),
+            { codigoPlanoConta: '1126' },
+          ]),
+        }),
+      }),
+    );
+
+    await service.getSsmaActuals(
+      { company: 'PEDRAFORTE', year: 2026, month: 9, code: '1445' },
+      'ssma',
+    );
+    expect(prisma.aethosPlanoContaCost.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ AND: expect.arrayContaining([{ codigoPlanoConta: '1445' }]) }),
+      }),
+    );
+  });
+
+  it('denies unapproved roles, companies, account codes and pages before any database read', async () => {
+    const prisma = makePrisma();
+    const service = new BudgetAnalysisService(prisma as never);
+
+    await expect(service.getSsmaActuals({ code: '393' }, 'gestor')).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.getSsmaActuals({ company: 'PRUMARE', code: '393' }, 'ssma')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.getSsmaActuals({ code: '9999' }, 'ssma')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.getSsmaActuals({ company: 'PEDRAFORTE', code: '393' }, 'ssma')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.getSsmaActuals({ code: '393', page: -1 }, 'ssma')).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.aethosPlanoContaCost.findMany).not.toHaveBeenCalled();
   });
 });

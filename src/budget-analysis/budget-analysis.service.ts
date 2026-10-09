@@ -269,6 +269,38 @@ const SSMA_COMPANY_CODES: Record<SsmaCompany, string> = {
   JR_CONSTRUCOES: '1',
   PEDRAFORTE: '4',
 };
+const SSMA_ACTUALS_PAGE_SIZE = 50;
+
+function ssmaActualScopeWhere(
+  company: SsmaCompany,
+): Prisma.AethosPlanoContaCostWhereInput {
+  const accounts = SSMA_ACCOUNTS[company];
+  const budgetCodes = accounts
+    .filter((account) => account.budgeted)
+    .map((account) => account.code);
+  const sharedCodes = accounts
+    .filter((account) => !account.budgeted)
+    .map((account) => account.code);
+
+  return company === 'PEDRAFORTE'
+    ? {
+        OR: [
+          {
+            codigoPlanoConta: { in: budgetCodes },
+            // Contas próprias da Pedraforte também aparecem no razão da JR.
+            codigoEmpresa: { in: ['1', '4'] },
+          },
+          {
+            codigoPlanoConta: { in: sharedCodes },
+            codigoEmpresa: '4',
+          },
+        ],
+      }
+    : {
+        codigoEmpresa: SSMA_COMPANY_CODES[company],
+        codigoPlanoConta: { in: accounts.map((account) => account.code) },
+      };
+}
 
 const COMPANY_LABELS: Record<BudgetCompany, string> = {
   PRUMARE: 'Prumare',
@@ -659,32 +691,10 @@ export class BudgetAnalysisService {
     const month = normalizeMonth(query.month);
     const competencia = normalizeCompetencia(year, month);
     const accounts = SSMA_ACCOUNTS[selectedCompany];
-    const codes = accounts.map((account) => account.code);
     const budgetCodes = accounts
       .filter((account) => account.budgeted)
       .map((account) => account.code);
-    const sharedCodes = accounts
-      .filter((account) => !account.budgeted)
-      .map((account) => account.code);
-    const actualScopeWhere: Prisma.AethosPlanoContaCostWhereInput =
-      selectedCompany === 'PEDRAFORTE'
-        ? {
-            OR: [
-              {
-                codigoPlanoConta: { in: budgetCodes },
-                // Pedraforte-specific accounts also occur in the JR ledger.
-                codigoEmpresa: { in: ['1', '4'] },
-              },
-              {
-                codigoPlanoConta: { in: sharedCodes },
-                codigoEmpresa: '4',
-              },
-            ],
-          }
-        : {
-            codigoEmpresa: SSMA_COMPANY_CODES[selectedCompany],
-            codigoPlanoConta: { in: codes },
-          };
+    const actualScopeWhere = ssmaActualScopeWhere(selectedCompany);
     const version = await this.findVersion(year);
     const [lines, actuals, lastSync] = await Promise.all([
       this.prisma.budgetLine.findMany({
@@ -790,6 +800,118 @@ export class BudgetAnalysisService {
               : 0,
       },
       rows,
+    };
+  }
+
+  async getSsmaActuals(
+    query: Record<string, unknown>,
+    actorRole?: string | null,
+  ) {
+    if (!SSMA_ROLES.has(normalizeRole(actorRole))) {
+      throw new ForbiddenException(
+        'Sem permissao para os lancamentos de seguranca',
+      );
+    }
+
+    const company = coerceText(query.company || 'JR_CONSTRUCOES').toUpperCase();
+    if (company !== 'JR_CONSTRUCOES' && company !== 'PEDRAFORTE') {
+      throw new BadRequestException('Empresa invalida');
+    }
+    const selectedCompany = company as SsmaCompany;
+    const code = coerceText(query.code);
+    const account = SSMA_ACCOUNTS[selectedCompany].find(
+      (candidate) => candidate.code === code,
+    );
+    if (!account) {
+      throw new BadRequestException('Plano de conta fora do escopo SSMA');
+    }
+
+    const year = normalizeYear(query.year);
+    const month = normalizeMonth(query.month);
+    const competencia = normalizeCompetencia(year, month);
+    const page = Number(query.page ?? 1);
+    if (!Number.isInteger(page) || page < 1 || page > 1000) {
+      throw new BadRequestException('Pagina invalida');
+    }
+
+    const where: Prisma.AethosPlanoContaCostWhereInput = {
+      AND: [
+        planAccountWhereByDateBasis(
+          year,
+          month,
+          competencia,
+          'lancamento',
+          'without_forecast',
+        ),
+        ssmaActualScopeWhere(selectedCompany),
+        { codigoPlanoConta: code },
+      ],
+    };
+    const [totals, rows] = await Promise.all([
+      this.prisma.aethosPlanoContaCost.aggregate({
+        where,
+        _count: { _all: true },
+        _sum: { valorCusto: true },
+      }),
+      this.prisma.aethosPlanoContaCost.findMany({
+        where,
+        orderBy: [{ dataBaseLancamento: 'desc' }, { id: 'asc' }],
+        skip: (page - 1) * SSMA_ACTUALS_PAGE_SIZE,
+        take: SSMA_ACTUALS_PAGE_SIZE,
+        select: {
+          id: true,
+          idLancamento: true,
+          nomeEmpresa: true,
+          dataBaseLancamento: true,
+          dataLancamento: true,
+          numeroNotaFiscal: true,
+          dataEmissaoNotaFiscal: true,
+          observacaoLancamento: true,
+          observacaoNotaFiscal: true,
+          valorCusto: true,
+          raw: true,
+        },
+      }),
+    ]);
+
+    return {
+      company: selectedCompany,
+      companyLabel: COMPANY_LABELS[selectedCompany],
+      year,
+      month,
+      code,
+      description: account.label,
+      category: account.category,
+      dateBasis: 'lancamento' as const,
+      forecastFilter: 'without_forecast' as const,
+      page,
+      pageSize: SSMA_ACTUALS_PAGE_SIZE,
+      count: totals._count._all,
+      total: roundMoney(decimalToNumber(totals._sum.valorCusto)),
+      rows: rows.map((row) => {
+        const raw =
+          row.raw && typeof row.raw === 'object' && !Array.isArray(row.raw)
+            ? (row.raw as Record<string, unknown>)
+            : {};
+        return {
+          id: row.id,
+          idLancamento: row.idLancamento,
+          nomeEmpresa: row.nomeEmpresa,
+          dataReferencia: row.dataBaseLancamento?.toISOString() || null,
+          dataLancamento: row.dataLancamento?.toISOString() || null,
+          numeroNotaFiscal: row.numeroNotaFiscal,
+          dataEmissaoNotaFiscal:
+            row.dataEmissaoNotaFiscal?.toISOString() || null,
+          observacaoLancamento: row.observacaoLancamento,
+          observacaoNotaFiscal: row.observacaoNotaFiscal,
+          obra: coerceText(raw.nomeObra) || coerceText(raw.codigoObra) || null,
+          centroCusto:
+            coerceText(raw.nomeCentroCusto) ||
+            coerceText(raw.codigoCentroCusto) ||
+            null,
+          valor: roundMoney(decimalToNumber(row.valorCusto)),
+        };
+      }),
     };
   }
 
