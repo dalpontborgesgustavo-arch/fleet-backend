@@ -27,6 +27,11 @@ export class BudgetAnalysisController {
     return this.service.getSsmaOverview(query, req.user?.role);
   }
 
+  @Get('ssma/actuals')
+  ssmaActuals(@Req() req: any, @Query() query: Record<string, unknown>) {
+    return this.service.getSsmaActuals(query, req.user?.role);
+  }
+
   @Get('actuals')
   actuals(@Req() req: any, @Query() query: Record<string, unknown>) {
     return this.service.getActuals(query, req.user?.role);
