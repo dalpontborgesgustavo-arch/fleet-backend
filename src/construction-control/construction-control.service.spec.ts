@@ -26,7 +26,7 @@ describe('ConstructionControlService limited cadastral access', () => {
   };
 
   it.each(['administrativo', 'juridico'])(
-    'allows %s to update only the three limited fields',
+    'allows %s to update only the limited cadastral fields',
     async (role) => {
       const update = jest.fn().mockImplementation(({ data }) => ({
         data: data.data,
@@ -44,6 +44,7 @@ describe('ConstructionControlService limited cadastral access', () => {
           cnoBaixada: 'Sim',
           termoDefinitivoFinalizado: 'Sim',
           statusObra: 'Entregue',
+          dataEntregaEfetiva: '2026-10-15',
           cliente: 'NAO DEVE ALTERAR',
         },
         role,
@@ -56,8 +57,9 @@ describe('ConstructionControlService limited cadastral access', () => {
         cnoBaixada: 'Sim',
         termoDefinitivoFinalizado: 'Sim',
         statusObra: 'Entregue',
+        dataEntregaEfetiva: '2026-10-15',
       });
-      expect(result.audit).toHaveLength(3);
+      expect(result.audit).toHaveLength(4);
     },
   );
 
@@ -83,6 +85,62 @@ describe('ConstructionControlService limited cadastral access', () => {
         'juridico',
       ),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  it('rejects an invalid or non-delivered actual delivery date', async () => {
+    const service = new ConstructionControlService({} as any);
+    for (const [statusObra, dataEntregaEfetiva] of [
+      ['Entregue', '2026-02-30'],
+      ['Em andamento', '2026-10-15'],
+    ]) {
+      await expect(
+        service.updateLimitedCadastralFields(
+          'obra-1',
+          {
+            cnoBaixada: 'Nao',
+            termoDefinitivoFinalizado: 'Nao',
+            statusObra,
+            dataEntregaEfetiva,
+          },
+          'juridico',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    }
+  });
+
+  it('clears the actual delivery date when an older client reopens a delivered work', async () => {
+    const update = jest.fn().mockImplementation(({ data }) => ({
+      data: data.data,
+    }));
+    const service = new ConstructionControlService({
+      constructionControlState: {
+        findUnique: jest.fn().mockResolvedValue({
+          data: {
+            ...currentState,
+            works: [
+              {
+                ...currentState.works[0],
+                statusObra: 'Entregue',
+                dataEntregaEfetiva: '2026-10-15',
+              },
+            ],
+          },
+        }),
+        update,
+      },
+    } as any);
+
+    const result = (await service.updateLimitedCadastralFields(
+      'obra-1',
+      {
+        statusObra: 'Em andamento',
+        cnoBaixada: 'Nao',
+        termoDefinitivoFinalizado: 'Nao',
+      },
+      'juridico',
+    )) as any;
+
+    expect(result.works[0].dataEntregaEfetiva).toBe('');
   });
 
   it('allows Maria Eduarda to release a work schedule', async () => {
