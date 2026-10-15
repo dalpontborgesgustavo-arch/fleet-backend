@@ -99,8 +99,6 @@ type VehicleStatusEventResolution = {
 };
 
 const JR_AETHOS_COMPANY_ID = '1';
-const MAX_DEACTIVATIONS_WITHOUT_OVERRIDE = 5;
-const MAX_DEACTIVATION_RATIO_WITHOUT_OVERRIDE = 0.2;
 
 function normalizeText(value: unknown): string {
   if (value === undefined || value === null) return '';
@@ -270,7 +268,11 @@ function normalizeVehicleStatusEvents(body: unknown): {
       'codigo_empresa',
     ]);
     const previousStatus = normalizeStatus(
-      firstDefined(row, ['statusAnterior', 'status_anterior', 'previousStatus']),
+      firstDefined(row, [
+        'statusAnterior',
+        'status_anterior',
+        'previousStatus',
+      ]),
     );
     const currentStatus = normalizeStatus(
       firstDefined(row, ['statusAtual', 'status_atual', 'currentStatus']),
@@ -336,8 +338,11 @@ function normalizeVehicleStatusEvents(body: unknown): {
           '',
         ) || null,
       plate:
-        pickText(row, ['placaSistema', 'placa_sistema', 'placa']).toUpperCase() ||
-        null,
+        pickText(row, [
+          'placaSistema',
+          'placa_sistema',
+          'placa',
+        ]).toUpperCase() || null,
       previousStatus: previousStatus!,
       currentStatus: currentStatus!,
       changedAt: changedAt!,
@@ -367,7 +372,8 @@ function normalizeVehicleStatusEvents(body: unknown): {
           'inactiveReason',
         ]) || null,
       source:
-        pickText(row, ['origemHistorico', 'origem_historico', 'source']) || null,
+        pickText(row, ['origemHistorico', 'origem_historico', 'source']) ||
+        null,
       raw: toJsonValue(row),
     });
   });
@@ -639,26 +645,15 @@ function mapByKey(
 function resolveVehicleStatusEvents(
   events: NormalizedVehicleStatusEvent[],
   vehicles: ExistingVehicle[],
+  activeSnapshotIds: Set<string>,
 ): VehicleStatusEventResolution[] {
   const byAethosId = mapByKey(
     vehicles,
     (vehicle) => vehicle.aethosVehicleId ?? '',
   );
-  const byPlate = mapByKey(vehicles, (vehicle) => normalizeKey(vehicle.plate));
-  const byFleet = mapByKey(vehicles, (vehicle) =>
-    normalizeFleetKey(vehicle.fleet),
-  );
 
   return events.map((event) => {
     const aethosMatches = byAethosId.get(event.aethosId) ?? [];
-    if (aethosMatches.length === 1) {
-      return {
-        event,
-        vehicle: aethosMatches[0],
-        status: 'APPLIED',
-        message: null,
-      };
-    }
     if (aethosMatches.length > 1) {
       return {
         event,
@@ -667,67 +662,39 @@ function resolveVehicleStatusEvents(
         message: 'Mais de um cadastro vinculado ao mesmo ID Aethos.',
       };
     }
-
-    const plateMatches = event.plate
-      ? (byPlate.get(normalizeKey(event.plate)) ?? [])
-      : [];
-    if (plateMatches.length === 1) {
-      const candidate = plateMatches[0];
-      if (
-        candidate.aethosVehicleId &&
-        candidate.aethosVehicleId !== event.aethosId
-      ) {
-        return {
-          event,
-          vehicle: null,
-          status: 'CONFLICT',
-          message: `Placa vinculada a outro ID Aethos (${candidate.aethosVehicleId}).`,
-        };
-      }
-      return { event, vehicle: candidate, status: 'APPLIED', message: null };
-    }
-    if (plateMatches.length > 1) {
+    const vehicle = aethosMatches[0];
+    if (!vehicle) {
       return {
         event,
         vehicle: null,
-        status: 'CONFLICT',
-        message: 'Placa encontra mais de um cadastro interno.',
+        status: 'NOT_FOUND',
+        message: 'Nenhum cadastro interno vinculado ao ID Aethos do evento.',
       };
     }
-
-    const fleetMatches = event.fleet
-      ? (byFleet.get(normalizeFleetKey(event.fleet)) ?? [])
-      : [];
-    if (fleetMatches.length === 1) {
-      const candidate = fleetMatches[0];
-      if (
-        candidate.aethosVehicleId &&
-        candidate.aethosVehicleId !== event.aethosId
-      ) {
-        return {
-          event,
-          vehicle: null,
-          status: 'CONFLICT',
-          message: `Frota vinculada a outro ID Aethos (${candidate.aethosVehicleId}).`,
-        };
-      }
-      return { event, vehicle: candidate, status: 'APPLIED', message: null };
-    }
-    if (fleetMatches.length > 1) {
+    if (
+      event.plate &&
+      normalizeKey(event.plate) !== normalizeKey(vehicle.plate)
+    ) {
       return {
         event,
-        vehicle: null,
+        vehicle,
         status: 'CONFLICT',
-        message: 'Frota encontra mais de um cadastro interno.',
+        message: 'Placa do evento diverge do cadastro vinculado ao ID Aethos.',
       };
     }
-
-    return {
-      event,
-      vehicle: null,
-      status: 'NOT_FOUND',
-      message: 'Nenhum cadastro interno encontrado por ID Aethos, placa ou frota unica.',
-    };
+    const activeInSnapshot = activeSnapshotIds.has(event.aethosId);
+    if (
+      (event.currentStatus === 'S' && !activeInSnapshot) ||
+      (event.currentStatus === 'N' && activeInSnapshot)
+    ) {
+      return {
+        event,
+        vehicle,
+        status: 'CONFLICT',
+        message: 'Evento de status contradiz a fotografia ativa atual.',
+      };
+    }
+    return { event, vehicle, status: 'APPLIED', message: null };
   });
 }
 
@@ -885,7 +852,10 @@ export class AethosVehicleSyncService {
     });
 
     const incomingIds = new Set(incomingVehicles.map((row) => row.aethosId));
-    const deactivate = existingVehicles.filter(
+    // `vehicles` is an importable subset, filtered by the extractor's owner,
+    // company and type rules. Absence from it is not evidence of FL_ATIVO=N.
+    // An official status transition is handled separately below.
+    const managedActiveOutsideImport = existingVehicles.filter(
       (vehicle) =>
         vehicle.aethosManaged &&
         vehicle.active &&
@@ -895,13 +865,6 @@ export class AethosVehicleSyncService {
     const managedActiveBefore = existingVehicles.filter(
       (vehicle) => vehicle.aethosManaged && vehicle.active,
     ).length;
-    const deactivationRatio = managedActiveBefore
-      ? deactivate.length / managedActiveBefore
-      : 0;
-    const largeDeactivationBlocked =
-      !snapshot.allowLargeDeactivation &&
-      deactivate.length > MAX_DEACTIVATIONS_WITHOUT_OVERRIDE &&
-      deactivationRatio > MAX_DEACTIVATION_RATIO_WITHOUT_OVERRIDE;
     const createdCount = planned.filter(
       (entry) => entry.action === 'CREATE',
     ).length;
@@ -937,8 +900,23 @@ export class AethosVehicleSyncService {
     const pendingStatusEvents = snapshot.statusEvents.filter(
       (event) => !previouslyAppliedById.has(event.eventId),
     );
+    const plannedByExistingId = new Map(
+      planned
+        .filter((entry) => entry.existing)
+        .map((entry) => [entry.existing!.id, entry.row] as const),
+    );
     const previewVehicles: ExistingVehicle[] = [
-      ...existingVehicles,
+      ...existingVehicles.map((vehicle) => {
+        const row = plannedByExistingId.get(vehicle.id);
+        return row
+          ? {
+              ...vehicle,
+              active: true,
+              aethosVehicleId: row.aethosId,
+              aethosManaged: true,
+            }
+          : vehicle;
+      }),
       ...planned
         .filter((entry) => !entry.existing)
         .map((entry) => ({
@@ -959,7 +937,11 @@ export class AethosVehicleSyncService {
           status: 'ALREADY_PROCESSED',
           message: null,
         })),
-      ...resolveVehicleStatusEvents(pendingStatusEvents, previewVehicles),
+      ...resolveVehicleStatusEvents(
+        pendingStatusEvents,
+        previewVehicles,
+        incomingIds,
+      ),
     ];
     const previewStatusEventResults = previewStatusEventResolutions.map(
       (resolution) => ({
@@ -1008,10 +990,11 @@ export class AethosVehicleSyncService {
         (resolution) => resolution.status === 'CONFLICT',
       ).length,
       statusEventResults: previewStatusEventResults,
-      deactivatedCount: deactivate.length,
+      deactivatedCount: 0,
+      managedActiveOutsideImportCount: managedActiveOutsideImport.length,
       managedActiveBefore,
-      deactivationRatio: Number(deactivationRatio.toFixed(4)),
-      largeDeactivationBlocked,
+      deactivationRatio: 0,
+      largeDeactivationBlocked: false,
       executed: false,
       replayed: false,
     };
@@ -1029,14 +1012,6 @@ export class AethosVehicleSyncService {
         ...summary,
       });
     }
-    if (largeDeactivationBlocked) {
-      throw new BadRequestException({
-        message:
-          'Fotografia bloqueada por queda anormal de veiculos. Valide a origem antes de autorizar inativacao em massa.',
-        ...summary,
-      });
-    }
-
     const now = new Date();
     const payloadHash = createHash('sha256')
       .update(
@@ -1064,7 +1039,7 @@ export class AethosVehicleSyncService {
       linkedCount,
       updatedCount,
       reactivatedCount,
-      deactivatedCount: deactivate.length,
+      deactivatedCount: 0,
     };
 
     try {
@@ -1121,13 +1096,6 @@ export class AethosVehicleSyncService {
             });
           }
 
-          if (deactivate.length) {
-            await tx.vehicle.updateMany({
-              where: { id: { in: deactivate.map((vehicle) => vehicle.id) } },
-              data: { active: false, aethosSyncedAt: now },
-            });
-          }
-
           const transactionVehicles = snapshot.statusEvents.length
             ? await tx.vehicle.findMany({
                 select: {
@@ -1160,6 +1128,7 @@ export class AethosVehicleSyncService {
           const eventResolutions = resolveVehicleStatusEvents(
             eventsToApply,
             transactionVehicles,
+            incomingIds,
           );
           const finalStatusEventResults: Array<{
             idEventoAethos: string;
@@ -1173,41 +1142,36 @@ export class AethosVehicleSyncService {
               idEventoAethos: event.eventId,
               idVeiculoAethos: event.aethosId,
               status: 'ALREADY_PROCESSED',
-              vehicleId: storedAppliedById.get(event.eventId)?.vehicleId ?? null,
+              vehicleId:
+                storedAppliedById.get(event.eventId)?.vehicleId ?? null,
               message: null,
             }));
 
           for (const resolution of eventResolutions) {
             const event = resolution.event;
             const vehicleId = resolution.vehicle?.id ?? null;
-            let applicationStatus = resolution.status;
-            let applicationMessage = resolution.message;
+            const applicationStatus = resolution.status;
+            const applicationMessage = resolution.message;
 
             if (resolution.status === 'APPLIED' && resolution.vehicle) {
               const shouldBeActive =
                 event.currentStatus === 'S' && incomingIds.has(event.aethosId);
-              if (event.currentStatus === 'S' && !shouldBeActive) {
-                applicationStatus = 'CONFLICT';
-                applicationMessage =
-                  'Reativacao recebida, mas o veiculo nao consta na fotografia ativa atual.';
-              } else {
-                await setVehicleAuditContext(tx, {
-                  source: 'AETHOS',
-                  userId: event.changedByUserId,
-                  name: event.changedByName || 'Integracao Aethos',
-                  email: event.changedByLogin,
-                });
-                await tx.vehicle.update({
-                  where: { id: resolution.vehicle.id },
-                  data: {
-                    active: shouldBeActive,
-                    aethosVehicleId: event.aethosId,
-                    aethosManaged: true,
-                    aethosCompanyId: event.companyId,
-                    aethosSyncedAt: now,
-                  },
-                });
-              }
+              await setVehicleAuditContext(tx, {
+                source: 'AETHOS',
+                userId: event.changedByUserId,
+                name: event.changedByName || 'Integracao Aethos',
+                email: event.changedByLogin,
+              });
+              await tx.vehicle.update({
+                where: { id: resolution.vehicle.id },
+                data: {
+                  active: shouldBeActive,
+                  aethosVehicleId: event.aethosId,
+                  aethosManaged: true,
+                  aethosCompanyId: event.companyId,
+                  aethosSyncedAt: now,
+                },
+              });
             }
 
             const applied = applicationStatus === 'APPLIED';
@@ -1301,7 +1265,7 @@ export class AethosVehicleSyncService {
               linkedCount,
               updatedCount,
               reactivatedCount,
-              deactivatedCount: deactivate.length,
+              deactivatedCount: 0,
               result: executedResult as Prisma.InputJsonValue,
             },
           });
