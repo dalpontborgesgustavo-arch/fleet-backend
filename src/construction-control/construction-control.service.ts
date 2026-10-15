@@ -73,6 +73,7 @@ const AUDIT_FIELD_LABELS: Record<string, string> = {
   valorInicialContrato: 'Valor inicial do contrato',
   bdiPrevisto: 'BDI previsto',
   dataEntrega: 'Data de entrega',
+  dataEntregaEfetiva: 'Data efetiva da entrega',
   dataEntregaFixa: 'Data de entrega fixa',
   cno: 'CNO',
   cnoBaixada: 'Baixa da CNO',
@@ -349,6 +350,7 @@ function validateLimitedCadastralFields(data: any) {
     data?.termoDefinitivoFinalizado || '',
   ).trim();
   const cnoBaixada = String(data?.cnoBaixada || '').trim();
+  const dataEntregaEfetiva = data?.dataEntregaEfetiva;
 
   if (!CONSTRUCTION_WORK_STATUS.has(statusObra)) {
     throw new BadRequestException('Status da obra invalido');
@@ -365,7 +367,34 @@ function validateLimitedCadastralFields(data: any) {
     );
   }
 
-  return { statusObra, termoDefinitivoFinalizado, cnoBaixada };
+  if (
+    dataEntregaEfetiva !== undefined &&
+    dataEntregaEfetiva !== '' &&
+    (typeof dataEntregaEfetiva !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(dataEntregaEfetiva) ||
+      Number.isNaN(Date.parse(`${dataEntregaEfetiva}T00:00:00Z`)) ||
+      new Date(`${dataEntregaEfetiva}T00:00:00Z`)
+        .toISOString()
+        .slice(0, 10) !== dataEntregaEfetiva)
+  ) {
+    throw new BadRequestException('Data efetiva da entrega invalida');
+  }
+  if (statusObra !== 'Entregue' && dataEntregaEfetiva) {
+    throw new BadRequestException(
+      'A data efetiva so pode ser informada para uma obra entregue',
+    );
+  }
+
+  return {
+    statusObra,
+    termoDefinitivoFinalizado,
+    cnoBaixada,
+    ...(statusObra !== 'Entregue'
+      ? { dataEntregaEfetiva: '' }
+      : dataEntregaEfetiva !== undefined
+        ? { dataEntregaEfetiva }
+        : {}),
+  };
 }
 
 function assertStatePayload(data: any) {
@@ -395,6 +424,21 @@ function assertStatePayload(data: any) {
     throw new BadRequestException(
       'A CNO so pode ser baixada quando a obra estiver entregue',
     );
+  }
+
+  const invalidActualDelivery = data.works.some((work: any) => {
+    const actual = work?.dataEntregaEfetiva;
+    if (!actual) return false;
+    if (typeof actual !== 'string') return true;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(actual)) return true;
+    const parsed = new Date(`${actual}T00:00:00Z`);
+    return (
+      Number.isNaN(parsed.getTime()) ||
+      parsed.toISOString().slice(0, 10) !== actual
+    );
+  });
+  if (invalidActualDelivery) {
+    throw new BadRequestException('Data efetiva da entrega invalida');
   }
 }
 
@@ -1263,16 +1307,26 @@ export class ConstructionControlService {
       },
       { key: 'cnoBaixada', label: 'Baixa da CNO' },
       { key: 'statusObra', label: 'Status da obra' },
+      { key: 'dataEntregaEfetiva', label: 'Data efetiva da entrega' },
     ] as const;
     const auditEntries = fieldDefinitions
-      .filter(({ key }) => String(currentWork[key] || 'Nao') !== fields[key])
+      .filter(
+        ({ key }) =>
+          fields[key] !== undefined &&
+          String(
+            currentWork[key] || (key === 'dataEntregaEfetiva' ? '' : 'Nao'),
+          ) !==
+            fields[key],
+      )
       .map(({ key, label }) => ({
         id: randomUUID(),
         workId,
         origem: 'Dados Cadastrais',
         referencia: label,
-        valorAntigo: String(currentWork[key] || 'Nao'),
-        valorNovo: fields[key],
+        valorAntigo: String(
+          currentWork[key] || (key === 'dataEntregaEfetiva' ? '' : 'Nao'),
+        ),
+        valorNovo: String(fields[key] || ''),
         usuario: actor,
         usuarioId: String(actorId || ''),
         usuarioEmail: String(actorEmail || ''),
