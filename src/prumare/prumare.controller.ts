@@ -152,6 +152,27 @@ export class PrumareController {
     );
   }
 
+  @Get('vgv-scenarios')
+  findVgvScenarios(
+    @Req() req: any,
+    @Query('enterpriseId') enterpriseId: string,
+  ) {
+    return this.prumareService.findVgvScenarios(
+      enterpriseId,
+      req.user?.role,
+      req.user?.sub,
+    );
+  }
+
+  @Post('vgv-scenarios')
+  saveVgvScenario(@Req() req: any, @Body() data: any) {
+    return this.prumareService.saveVgvScenario(
+      data,
+      req.user?.role,
+      req.user?.sub,
+    );
+  }
+
   @Post('enterprises/:enterpriseId/simulate-table')
   simulateTable(
     @Req() req: any,

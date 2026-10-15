@@ -1452,6 +1452,86 @@ export class PrumareService {
     });
   }
 
+  async findVgvScenarios(
+    enterpriseId: string,
+    role?: string | null,
+    actorId?: string | null,
+  ) {
+    ensureManageAccess(role);
+    const scope = requiredText(enterpriseId, 'Empreendimento');
+    if (!actorId) throw new ForbiddenException('Usuario nao identificado');
+    if (scope !== '__ALL_ENTERPRISES__') await this.ensureEnterprise(scope);
+
+    return this.prisma.prumareVgvScenario.findMany({
+      where: {
+        createdBy: actorId,
+        enterpriseId: scope === '__ALL_ENTERPRISES__' ? null : scope,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+  }
+
+  async saveVgvScenario(
+    data: any,
+    role?: string | null,
+    actorId?: string | null,
+  ) {
+    ensureManageAccess(role);
+    if (!actorId) throw new ForbiddenException('Usuario nao identificado');
+    const scope = requiredText(data?.enterpriseId, 'Empreendimento');
+    if (scope !== '__ALL_ENTERPRISES__') await this.ensureEnterprise(scope);
+
+    const title = requiredText(data?.title, 'Nome do cenario');
+    if (title.length > 120) {
+      throw new BadRequestException(
+        'Nome do cenario deve ter ate 120 caracteres',
+      );
+    }
+    if (
+      !Array.isArray(data?.phases) ||
+      data.phases.length < 1 ||
+      data.phases.length > 20
+    ) {
+      throw new BadRequestException('Informe de 1 a 20 fases');
+    }
+    const phases = data.phases.map((phase: any) => {
+      const label = requiredText(phase?.label, 'Nome da fase');
+      if (label.length > 100) {
+        throw new BadRequestException(
+          'Nome da fase deve ter ate 100 caracteres',
+        );
+      }
+      const triggerLots = phase?.triggerLots;
+      const increasePercent = phase?.increasePercent;
+      if (
+        !Number.isInteger(triggerLots) ||
+        triggerLots < 0 ||
+        triggerLots > 1_000_000
+      ) {
+        throw new BadRequestException('Gatilho de lotes invalido');
+      }
+      if (
+        typeof increasePercent !== 'number' ||
+        !Number.isFinite(increasePercent) ||
+        increasePercent < 0 ||
+        increasePercent > 100
+      ) {
+        throw new BadRequestException('Percentual de aumento invalido');
+      }
+      return { label, triggerLots, increasePercent };
+    });
+
+    return this.prisma.prumareVgvScenario.create({
+      data: {
+        enterpriseId: scope === '__ALL_ENTERPRISES__' ? null : scope,
+        createdBy: actorId,
+        title,
+        phases: phases as Prisma.InputJsonValue,
+      },
+    });
+  }
+
   async simulateTable(
     enterpriseId: string,
     data: any,

@@ -857,6 +857,7 @@ model PrumareEnterprise {
 
   lots             PrumareLot[]
   simulations      PrumareSimulation[]
+  vgvScenarios     PrumareVgvScenario[]
   receivables      PrumareReceivable[]
   priceAdjustments PrumarePriceAdjustment[]
 }
@@ -988,6 +989,19 @@ model PrumareSimulation {
   @@index([lotId])
   @@index([createdBy])
   @@index([kind])
+}
+
+model PrumareVgvScenario {
+  id           String   @id @default(uuid())
+  enterpriseId String?
+  createdBy    String
+  title        String
+  phases       Json
+  createdAt    DateTime @default(now())
+
+  enterprise PrumareEnterprise? @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
+
+  @@index([createdBy, enterpriseId, createdAt])
 }
 
 model PrumarePriceAdjustment {
