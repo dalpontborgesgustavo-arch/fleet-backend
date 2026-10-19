@@ -293,6 +293,8 @@ describe('SSMA security budget', () => {
       }),
     ]);
     expect(JSON.stringify(result)).not.toMatch(/confidentialExtra|revenue|scenario|faturamento/i);
+    expect(result.rows[0]).not.toHaveProperty('valorPago');
+    expect(result.rows[0]).not.toHaveProperty('valorSaldo');
   });
 
   it('keeps Pedraforte dedicated and shared-account scoping in the detail query', async () => {
