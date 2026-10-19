@@ -168,6 +168,21 @@ model AethosObraCusto {
   @@index([active])
 }
 
+// A complete, immutable Aethos snapshot for the SSMA work/product view.
+// Keeping both source sets together makes budget and actual readback atomic.
+model SsmaWorkCostSnapshot {
+  runId        String   @id
+  generatedAt  DateTime @unique
+  payloadHash  String
+  budgetCount  Int
+  actualCount  Int
+  budgets      Json
+  actuals      Json
+  receivedAt   DateTime @default(now())
+
+  @@index([receivedAt])
+}
+
 model AethosPurchaseOrder {
   id                   String                       @id @default(uuid())
   sourceOrderId        String

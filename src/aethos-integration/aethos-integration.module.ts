@@ -46,6 +46,7 @@ import { LucasFleetRevenueSyncService } from './lucas-fleet-revenue-sync.service
     LucasFleetRevenueSyncService,
   ],
   exports: [
+    AethosIntegrationService,
     TotvsFleetMaintenanceReferenceService,
     LucasFleetRevenueSyncService,
   ],
