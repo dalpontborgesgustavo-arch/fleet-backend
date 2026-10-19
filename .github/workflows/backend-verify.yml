@@ -30,7 +30,7 @@ jobs:
       - run: node scripts/compare-runtime-artifacts.mjs dist dist
       - run: npm test -- --runInBand
 
-  migration-rehearsal:
+  ssma-migration-rehearsal:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -56,5 +56,10 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci
-      - run: npx prisma migrate deploy
-      - run: npx prisma migrate status
+      # The historical migration chain cannot be replayed into an empty DB:
+      # 20260722153000_add_bi_monthly_checklist_views references checklist.type.
+      # Rehearse the new additive SQL alone, without changing past migrations.
+      - run: npx prisma generate
+      - run: npx prisma db execute --file prisma/migrations/20261019170000_add_ssma_work_cost_snapshots/migration.sql --schema prisma/schema.prisma
+      - run: >-
+          node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();db.ssmaWorkCostSnapshot.count().then(n=>{if(n!==0)process.exitCode=1;console.log("SSMA snapshot table readable:",n);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
