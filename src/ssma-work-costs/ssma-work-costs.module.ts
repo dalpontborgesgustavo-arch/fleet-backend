@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AethosIntegrationModule } from '../aethos-integration/aethos-integration.module';
+import { AuthModule } from '../auth/auth.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import {
   SsmaWorkCostsController,
@@ -8,7 +9,7 @@ import {
 import { SsmaWorkCostsService } from './ssma-work-costs.service';
 
 @Module({
-  imports: [PrismaModule, AethosIntegrationModule],
+  imports: [PrismaModule, AuthModule, AethosIntegrationModule],
   controllers: [SsmaWorkCostsController, SsmaWorkCostsSyncController],
   providers: [SsmaWorkCostsService],
 })
