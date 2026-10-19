@@ -29,6 +29,20 @@ jobs:
       - run: node --check scripts/verify-backend-release.mjs
       - run: node scripts/compare-runtime-artifacts.mjs dist dist
       - run: npm test -- --runInBand
+      # Release output is built on Linux from the exact main SHA, never on EC2.
+      - name: Package verified Linux release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          tar -czf backend-release.tgz dist node_modules/.prisma/client prisma/schema.prisma package.json package-lock.json
+          sha256sum backend-release.tgz > backend-release.sha256
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        with:
+          name: backend-release-${{ github.sha }}
+          path: |
+            backend-release.tgz
+            backend-release.sha256
+          retention-days: 7
 
   ssma-migration-rehearsal:
     runs-on: ubuntu-latest
