@@ -27,6 +27,7 @@ import { PrumareModule } from './prumare/prumare.module';
 import { RncsModule } from './rncs/rncs.module';
 import { RevenueForecastsModule } from './revenue-forecasts/revenue-forecasts.module';
 import { SsmaLicensesModule } from './ssma-licenses/ssma-licenses.module';
+import { SsmaWorkCostsModule } from './ssma-work-costs/ssma-work-costs.module';
 import { StorageModule } from './storage/storage.module';
 import { TaxForecastsModule } from './tax-forecasts/tax-forecasts.module';
 import { UsinaForecastsModule } from './usina-forecasts/usina-forecasts.module';
@@ -66,6 +67,7 @@ import { VehiclesModule } from './vehicles/vehicles.module';
     RncsModule,
     RevenueForecastsModule,
     SsmaLicensesModule,
+    SsmaWorkCostsModule,
     HrCommunicationsModule,
     LegalCasesModule,
     TopographyArrivalsModule,
