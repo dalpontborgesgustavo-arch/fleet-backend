@@ -45,18 +45,47 @@ describe('SSMA security budget', () => {
       findMany: jest.fn().mockResolvedValue([
         {
           id: 'cost-1',
+          matchKey: 'cost-match-1',
           idLancamento: 'aethos-1',
+          codigoPlanoConta: '393',
+          nomePlanoConta: 'Exames e laudos',
+          competencia: '2026-09',
+          codigoEmpresa: '1',
           nomeEmpresa: 'JR Construcoes',
           dataBaseLancamento: new Date('2026-09-15T00:00:00Z'),
           dataLancamento: new Date('2026-09-16T00:00:00Z'),
+          dataVencimento: new Date('2026-09-30T00:00:00Z'),
+          temNotaFiscal: true,
+          idNotaFiscal: 'nf-123',
           numeroNotaFiscal: '123',
           dataEmissaoNotaFiscal: new Date('2026-09-10T00:00:00Z'),
           observacaoLancamento: 'Exame ocupacional',
           observacaoNotaFiscal: null,
           valorCusto: 150,
+          valorPago: 50,
+          valorSaldo: 100,
+          origem: 'AETHOS',
+          status: 'A',
+          statusDescricao: 'Aberta',
+          tipoDocumento: 'NF',
+          tipoDocumentoDescricao: 'Nota fiscal',
+          syncedAt: new Date('2026-10-09T12:00:00Z'),
+          createdAt: new Date('2026-10-09T12:00:00Z'),
+          updatedAt: new Date('2026-10-09T12:00:00Z'),
           raw: {
             nomeObra: 'Usina',
+            codigoObra: '12',
             nomeCentroCusto: 'SSMA',
+            codigoCentroCusto: 'S1',
+            parceiroFiscal: {
+              tipo: 'FORNECEDOR', nome: 'Clinica Exemplo', cpfCnpj: '00000000000100',
+              confidentialExtra: 'never-return',
+            },
+            itensNotaFiscal: [{
+              codigoMaterial: 'EX-1', descricaoMaterial: 'Exame ocupacional',
+              quantidade: 1, unidadeMedida: 'UN', valorTotalItem: 150,
+              confidentialExtra: 'never-return',
+            }],
             confidentialExtra: 'never-return',
           },
         },
@@ -257,9 +286,15 @@ describe('SSMA security budget', () => {
         obra: 'Usina',
         centroCusto: 'SSMA',
         valor: 150,
+        valorRealizado: 150,
+        statusDescricao: 'Aberta',
+        parceiroFiscal: expect.objectContaining({ nome: 'Clinica Exemplo' }),
+        itensNotaFiscal: [expect.objectContaining({ descricaoMaterial: 'Exame ocupacional' })],
       }),
     ]);
     expect(JSON.stringify(result)).not.toMatch(/confidentialExtra|revenue|scenario|faturamento/i);
+    expect(result.rows[0]).not.toHaveProperty('valorPago');
+    expect(result.rows[0]).not.toHaveProperty('valorSaldo');
   });
 
   it('keeps Pedraforte dedicated and shared-account scoping in the detail query', async () => {

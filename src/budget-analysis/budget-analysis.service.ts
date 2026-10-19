@@ -335,6 +335,13 @@ function coerceText(value: unknown) {
   return '';
 }
 
+function coerceFiniteNumber(value: unknown) {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  if (typeof value === 'string' && !value.trim()) return null;
+  const parsed = Number(typeof value === 'string' ? value.replace(',', '.') : value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function normalizeComparable(value: unknown) {
   return coerceText(value)
     .normalize('NFD')
@@ -860,15 +867,31 @@ export class BudgetAnalysisService {
         take: SSMA_ACTUALS_PAGE_SIZE,
         select: {
           id: true,
+          matchKey: true,
           idLancamento: true,
+          codigoPlanoConta: true,
+          nomePlanoConta: true,
+          competencia: true,
+          codigoEmpresa: true,
           nomeEmpresa: true,
           dataBaseLancamento: true,
           dataLancamento: true,
+          dataVencimento: true,
+          temNotaFiscal: true,
+          idNotaFiscal: true,
           numeroNotaFiscal: true,
           dataEmissaoNotaFiscal: true,
           observacaoLancamento: true,
           observacaoNotaFiscal: true,
           valorCusto: true,
+          origem: true,
+          status: true,
+          statusDescricao: true,
+          tipoDocumento: true,
+          tipoDocumentoDescricao: true,
+          syncedAt: true,
+          createdAt: true,
+          updatedAt: true,
           raw: true,
         },
       }),
@@ -893,12 +916,45 @@ export class BudgetAnalysisService {
           row.raw && typeof row.raw === 'object' && !Array.isArray(row.raw)
             ? (row.raw as Record<string, unknown>)
             : {};
+        const partner =
+          raw.parceiroFiscal &&
+          typeof raw.parceiroFiscal === 'object' &&
+          !Array.isArray(raw.parceiroFiscal)
+            ? (raw.parceiroFiscal as Record<string, unknown>)
+            : null;
+        const items = Array.isArray(raw.itensNotaFiscal)
+          ? raw.itensNotaFiscal
+              .filter(
+                (item): item is Record<string, unknown> =>
+                  !!item && typeof item === 'object' && !Array.isArray(item),
+              )
+              .map((item) => ({
+                sequencia: coerceFiniteNumber(item.sequencia),
+                idItemNotaFiscal: coerceText(item.idItemNotaFiscal) || null,
+                tipoItem: coerceText(item.tipoItem) || null,
+                codigoMaterial: coerceText(item.codigoMaterial) || null,
+                descricaoMaterial: coerceText(item.descricaoMaterial) || null,
+                quantidade: coerceFiniteNumber(item.quantidade),
+                unidadeMedida: coerceText(item.unidadeMedida) || null,
+                valorUnitario: coerceFiniteNumber(item.valorUnitario),
+                valorTotalItem: coerceFiniteNumber(item.valorTotalItem),
+              }))
+          : [];
         return {
           id: row.id,
+          matchKey: row.matchKey,
+          idSubgrupo: row.codigoPlanoConta,
+          descricao: row.nomePlanoConta,
+          competencia: row.competencia,
           idLancamento: row.idLancamento,
+          codigoEmpresa: row.codigoEmpresa,
           nomeEmpresa: row.nomeEmpresa,
           dataReferencia: row.dataBaseLancamento?.toISOString() || null,
+          dataBaseLancamento: row.dataBaseLancamento?.toISOString() || null,
           dataLancamento: row.dataLancamento?.toISOString() || null,
+          dataVencimento: row.dataVencimento?.toISOString() || null,
+          temNotaFiscal: row.temNotaFiscal,
+          idNotaFiscal: row.idNotaFiscal,
           numeroNotaFiscal: row.numeroNotaFiscal,
           dataEmissaoNotaFiscal:
             row.dataEmissaoNotaFiscal?.toISOString() || null,
@@ -910,6 +966,30 @@ export class BudgetAnalysisService {
             coerceText(raw.codigoCentroCusto) ||
             null,
           valor: roundMoney(decimalToNumber(row.valorCusto)),
+          valorRealizado: roundMoney(decimalToNumber(row.valorCusto)),
+          origem: row.origem,
+          status: row.status,
+          statusDescricao: row.statusDescricao,
+          tipoDocumento: row.tipoDocumento,
+          tipoDocumentoDescricao: row.tipoDocumentoDescricao,
+          parceiroFiscal: partner
+            ? {
+                tipo: coerceText(partner.tipo) || null,
+                id: coerceText(partner.id) || null,
+                codigo: coerceText(partner.codigo) || null,
+                nome: coerceText(partner.nome) || null,
+                nomeFantasia: coerceText(partner.nomeFantasia) || null,
+                cpfCnpj: coerceText(partner.cpfCnpj) || null,
+              }
+            : null,
+          itensNotaFiscal: items,
+          raw: {
+            codigoObra: coerceText(raw.codigoObra) || null,
+            codigoCentroCusto: coerceText(raw.codigoCentroCusto) || null,
+          },
+          syncedAt: row.syncedAt.toISOString(),
+          createdAt: row.createdAt.toISOString(),
+          updatedAt: row.updatedAt.toISOString(),
         };
       }),
     };
