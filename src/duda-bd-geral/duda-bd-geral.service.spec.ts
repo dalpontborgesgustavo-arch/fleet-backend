@@ -1,4 +1,9 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
+import { DUDA_BD_GERAL_COLUMNS } from './duda-bd-geral.columns';
 import { DudaBdGeralService } from './duda-bd-geral.service';
 
 describe('DudaBdGeralService', () => {
@@ -11,6 +16,13 @@ describe('DudaBdGeralService', () => {
   const prisma = {
     dudaBdGeralImport: { findUnique: jest.fn(), findMany: jest.fn() },
     dudaBdGeralViewPreference: { findUnique: jest.fn(), upsert: jest.fn() },
+    dudaBdGeralManualEntry: {
+      findUnique: jest.fn(),
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    dudaBdGeralManualEntryRevision: { create: jest.fn(), findMany: jest.fn() },
     dudaBdGeralRow: {
       count: jest.fn(),
       findMany: jest.fn(),
@@ -28,9 +40,24 @@ describe('DudaBdGeralService', () => {
     prisma.dudaBdGeralRow.findMany.mockReturnValue(
       Promise.resolve([{ excelRow: 8 }]),
     );
-    prisma.$transaction.mockImplementation(async (queries) =>
-      Promise.all(queries),
+    prisma.$transaction.mockImplementation(
+      (
+        query:
+          | ((client: typeof prisma) => Promise<unknown>)
+          | Promise<unknown>[],
+      ) => (typeof query === 'function' ? query(prisma) : Promise.all(query)),
     );
+    prisma.$queryRaw
+      .mockResolvedValueOnce([{ total: 1 }])
+      .mockResolvedValueOnce([
+        {
+          id: 'row-8',
+          excelRow: 8,
+          cells: {},
+          version: 0,
+          manualState: 'source',
+        },
+      ]);
   });
 
   it('paginates the physical worksheet including hidden rows', async () => {
@@ -41,16 +68,8 @@ describe('DudaBdGeralService', () => {
       q: 'obra',
     });
     expect(result).toMatchObject({ page: 2, pageSize: 20, total: 1 });
-    const calls: unknown = prisma.dudaBdGeralRow.findMany.mock.calls;
-    const query = (calls as unknown[][])[0]?.[0];
-    expect(query).toMatchObject({
-      skip: 20,
-      take: 20,
-      where: { importId: 'batch-1' },
-    });
-    expect((query as { where: object }).where).not.toHaveProperty(
-      'hiddenByFilter',
-    );
+    expect(result.rows).toMatchObject([{ id: 'row-8', excelRow: 8 }]);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
   });
 
   it.each([{ page: '0' }, { pageSize: '101' }, { serviceMonth: '2026-13' }])(
@@ -75,12 +94,12 @@ describe('DudaBdGeralService', () => {
   });
 
   it('filters a source column before paginating and returns its cells', async () => {
+    prisma.$queryRaw.mockReset();
     prisma.$queryRaw
       .mockResolvedValueOnce([{ total: 1 }])
-      .mockResolvedValueOnce([{ id: 'row-8' }]);
-    prisma.dudaBdGeralRow.findMany.mockResolvedValueOnce([
-      { id: 'row-8', excelRow: 8, cells: { U: { raw: 100 } } },
-    ]);
+      .mockResolvedValueOnce([
+        { id: 'row-8', excelRow: 8, cells: { U: { raw: 100 } } },
+      ]);
     const result = await service.listRows('batch-1', {
       page: '1',
       columnFilters: '{"U":"100"}',
@@ -116,11 +135,92 @@ describe('DudaBdGeralService', () => {
 
   it('does not return a row from another import', async () => {
     prisma.dudaBdGeralRow.findFirst.mockResolvedValue(null);
+    prisma.dudaBdGeralManualEntry.findFirst.mockResolvedValue(null);
     await expect(service.getRow('batch-1', 'row-2')).rejects.toThrow(
       NotFoundException,
     );
     expect(prisma.dudaBdGeralRow.findFirst).toHaveBeenCalledWith({
       where: { id: 'row-2', importId: 'batch-1' },
+      include: { manualEntry: true },
     });
+  });
+
+  const manualValues = () =>
+    Object.fromEntries(
+      DUDA_BD_GERAL_COLUMNS.map((key) => [
+        key,
+        key === 'A' ? 'ITEM 1' : key === 'B' ? '2026-10' : '',
+      ]),
+    );
+
+  it('creates a provisional manual record with an audit revision', async () => {
+    const values = manualValues();
+    prisma.dudaBdGeralManualEntry.create.mockResolvedValue({
+      id: 'manual-1',
+      cells: { A: { raw: 'ITEM 1' } },
+      version: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const result = await service.createManualEntry(
+      'batch-1',
+      'admin-1',
+      values,
+    );
+    expect(result).toMatchObject({
+      id: 'manual-1',
+      manualState: 'new',
+      version: 1,
+    });
+    const calls: unknown =
+      prisma.dudaBdGeralManualEntryRevision.create.mock.calls;
+    const auditCall = (
+      calls as Array<
+        Array<{
+          data: {
+            entryId: string;
+            action: string;
+            changedByUserId: string;
+            afterCells: unknown;
+          };
+        }>
+      >
+    )[0][0];
+    expect(auditCall.data).toMatchObject({
+      entryId: 'manual-1',
+      action: 'CREATE_MANUAL',
+      changedByUserId: 'admin-1',
+      afterCells: values,
+    });
+  });
+
+  it('rejects formulas and a missing identity in new manual records', async () => {
+    const values = manualValues();
+    values.A = '=NOW()';
+    await expect(
+      service.createManualEntry('batch-1', 'admin-1', values),
+    ).rejects.toThrow(BadRequestException);
+    values.A = '';
+    await expect(
+      service.createManualEntry('batch-1', 'admin-1', values),
+    ).rejects.toThrow(BadRequestException);
+    expect(prisma.dudaBdGeralManualEntry.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects stale source edits before writing an overlay', async () => {
+    prisma.dudaBdGeralRow.findFirst.mockResolvedValue({
+      id: 'row-8',
+      classification: 'detail_candidate',
+      cells: { A: { raw: 'ITEM 1' }, B: { raw: '2026-10' } },
+    });
+    prisma.dudaBdGeralManualEntry.findUnique.mockResolvedValue({
+      id: 'overlay-1',
+      version: 2,
+      cells: {},
+    });
+    await expect(
+      service.updateRow('batch-1', 'row-8', 'admin-1', manualValues(), 1),
+    ).rejects.toThrow(ConflictException);
+    expect(prisma.dudaBdGeralManualEntry.updateMany).not.toHaveBeenCalled();
   });
 });

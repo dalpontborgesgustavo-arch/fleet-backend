@@ -4144,6 +4144,7 @@ model DudaBdGeralImport {
   manifest             Json
   createdAt            DateTime            @default(now()) @db.Timestamptz(6)
   rows                 DudaBdGeralRow[]
+  manualEntries        DudaBdGeralManualEntry[]
 
   @@index([status, createdAt])
 }
@@ -4171,6 +4172,7 @@ model DudaBdGeralRow {
   issues               Json
   createdAt            DateTime          @default(now()) @db.Timestamptz(6)
   import               DudaBdGeralImport @relation(fields: [importId], references: [id], onDelete: Restrict)
+  manualEntry          DudaBdGeralManualEntry?
 
   @@unique([importId, excelRow])
   @@index([importId, classification, excelRow])
@@ -4185,4 +4187,39 @@ model DudaBdGeralViewPreference {
   hiddenColumns Json     @default("[]")
   updatedAt     DateTime @default(now()) @updatedAt @db.Timestamptz(6)
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Editable working data never mutates the imported worksheet snapshot. When
+// sourceRowId is set, cells contains only manual overrides; otherwise it is a
+// new manual record. Every write is provisional and has a revision below.
+model DudaBdGeralManualEntry {
+  id              String                         @id @default(uuid())
+  importId        String
+  sourceRowId     String?                        @unique
+  cells           Json
+  version         Int                            @default(1)
+  createdByUserId String
+  updatedByUserId String
+  createdAt       DateTime                       @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime                       @updatedAt @db.Timestamptz(6)
+  import          DudaBdGeralImport              @relation(fields: [importId], references: [id], onDelete: Restrict)
+  sourceRow       DudaBdGeralRow?                @relation(fields: [sourceRowId], references: [id], onDelete: Restrict)
+  revisions       DudaBdGeralManualEntryRevision[]
+
+  @@index([importId, createdAt])
+}
+
+model DudaBdGeralManualEntryRevision {
+  id              String                  @id @default(uuid())
+  entryId         String
+  version         Int
+  action          String
+  beforeCells     Json?
+  afterCells      Json
+  changedByUserId String
+  changedAt       DateTime                @default(now()) @db.Timestamptz(6)
+  entry           DudaBdGeralManualEntry  @relation(fields: [entryId], references: [id], onDelete: Restrict)
+
+  @@unique([entryId, version])
+  @@index([entryId, changedAt])
 }

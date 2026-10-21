@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Post,
   Put,
   Query,
   Req,
@@ -72,5 +73,42 @@ export class DudaBdGeralController {
   ) {
     assertDudaAdmin(req.user?.role);
     return this.service.getRow(importId, rowId);
+  }
+
+  @Post('imports/:importId/entries')
+  createManualEntry(
+    @Req() req: DudaAuthenticatedRequest,
+    @Param('importId') importId: string,
+    @Body() body: { cells?: unknown },
+  ) {
+    assertDudaAdmin(req.user?.role);
+    return this.service.createManualEntry(importId, req.user?.sub, body?.cells);
+  }
+
+  @Put('imports/:importId/rows/:rowId')
+  updateRow(
+    @Req() req: DudaAuthenticatedRequest,
+    @Param('importId') importId: string,
+    @Param('rowId') rowId: string,
+    @Body() body: { cells?: unknown; expectedVersion?: unknown },
+  ) {
+    assertDudaAdmin(req.user?.role);
+    return this.service.updateRow(
+      importId,
+      rowId,
+      req.user?.sub,
+      body?.cells,
+      body?.expectedVersion,
+    );
+  }
+
+  @Get('imports/:importId/rows/:rowId/revisions')
+  listRevisions(
+    @Req() req: DudaAuthenticatedRequest,
+    @Param('importId') importId: string,
+    @Param('rowId') rowId: string,
+  ) {
+    assertDudaAdmin(req.user?.role);
+    return this.service.listRevisions(importId, rowId);
   }
 }
