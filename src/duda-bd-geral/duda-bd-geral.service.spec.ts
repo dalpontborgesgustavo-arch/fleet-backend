@@ -10,12 +10,14 @@ describe('DudaBdGeralService', () => {
   };
   const prisma = {
     dudaBdGeralImport: { findUnique: jest.fn(), findMany: jest.fn() },
+    dudaBdGeralViewPreference: { findUnique: jest.fn(), upsert: jest.fn() },
     dudaBdGeralRow: {
       count: jest.fn(),
       findMany: jest.fn(),
       findFirst: jest.fn(),
     },
     $transaction: jest.fn(),
+    $queryRaw: jest.fn(),
   };
   const service = new DudaBdGeralService(prisma as never);
 
@@ -59,6 +61,58 @@ describe('DudaBdGeralService', () => {
       );
     },
   );
+
+  it.each([
+    '{',
+    '[]',
+    '{"H":"123"}',
+    '{"A":123}',
+    '{"A":"' + 'x'.repeat(121) + '"}',
+  ])('rejects unsafe column filters (%s)', async (columnFilters) => {
+    await expect(
+      service.listRows('batch-1', { columnFilters }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('filters a source column before paginating and returns its cells', async () => {
+    prisma.$queryRaw
+      .mockResolvedValueOnce([{ total: 1 }])
+      .mockResolvedValueOnce([{ id: 'row-8' }]);
+    prisma.dudaBdGeralRow.findMany.mockResolvedValueOnce([
+      { id: 'row-8', excelRow: 8, cells: { U: { raw: 100 } } },
+    ]);
+    const result = await service.listRows('batch-1', {
+      page: '1',
+      columnFilters: '{"U":"100"}',
+    });
+    expect(result).toMatchObject({
+      total: 1,
+      rows: [{ id: 'row-8', cells: { U: { raw: 100 } } }],
+    });
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('stores visible-column choices per authenticated user', async () => {
+    prisma.dudaBdGeralViewPreference.upsert.mockResolvedValue({
+      hiddenColumns: ['AA', 'AC'],
+    });
+    await expect(
+      service.putViewPreferences('user-1', ['AA', 'AC']),
+    ).resolves.toEqual({ hiddenColumns: ['AA', 'AC'] });
+    expect(prisma.dudaBdGeralViewPreference.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: 'user-1' } }),
+    );
+    await expect(service.putViewPreferences('user-1', ['H'])).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(
+      service.putViewPreferences('user-1', ['A', 'A']),
+    ).rejects.toThrow(BadRequestException);
+    prisma.dudaBdGeralViewPreference.findUnique.mockResolvedValue(null);
+    await expect(service.getViewPreferences('user-1')).resolves.toEqual({
+      hiddenColumns: [],
+    });
+  });
 
   it('does not return a row from another import', async () => {
     prisma.dudaBdGeralRow.findFirst.mockResolvedValue(null);

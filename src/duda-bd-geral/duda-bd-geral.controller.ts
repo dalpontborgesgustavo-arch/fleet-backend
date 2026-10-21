@@ -1,10 +1,19 @@
-import { Controller, Get, Param, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Put,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtGuard } from '../auth/jwt.guard';
-import { assertDudaOwner } from './duda-bd-geral.access';
+import { assertDudaAdmin } from './duda-bd-geral.access';
 import { DudaBdGeralService } from './duda-bd-geral.service';
 
 interface DudaAuthenticatedRequest {
-  user?: { email?: string | null };
+  user?: { sub?: string; role?: string | null };
 }
 
 @UseGuards(JwtGuard)
@@ -12,9 +21,24 @@ interface DudaAuthenticatedRequest {
 export class DudaBdGeralController {
   constructor(private readonly service: DudaBdGeralService) {}
 
+  @Get('view-preferences')
+  getViewPreferences(@Req() req: DudaAuthenticatedRequest) {
+    assertDudaAdmin(req.user?.role);
+    return this.service.getViewPreferences(req.user?.sub);
+  }
+
+  @Put('view-preferences')
+  putViewPreferences(
+    @Req() req: DudaAuthenticatedRequest,
+    @Body() body: { hiddenColumns?: unknown },
+  ) {
+    assertDudaAdmin(req.user?.role);
+    return this.service.putViewPreferences(req.user?.sub, body?.hiddenColumns);
+  }
+
   @Get('imports')
   listImports(@Req() req: DudaAuthenticatedRequest) {
-    assertDudaOwner(req.user?.email);
+    assertDudaAdmin(req.user?.role);
     return this.service.listImports();
   }
 
@@ -27,14 +51,16 @@ export class DudaBdGeralController {
     @Query('classification') classification?: string,
     @Query('serviceMonth') serviceMonth?: string,
     @Query('q') q?: string,
+    @Query('columnFilters') columnFilters?: string,
   ) {
-    assertDudaOwner(req.user?.email);
+    assertDudaAdmin(req.user?.role);
     return this.service.listRows(importId, {
       page,
       pageSize,
       classification,
       serviceMonth,
       q,
+      columnFilters,
     });
   }
 
@@ -44,7 +70,7 @@ export class DudaBdGeralController {
     @Param('importId') importId: string,
     @Param('rowId') rowId: string,
   ) {
-    assertDudaOwner(req.user?.email);
+    assertDudaAdmin(req.user?.role);
     return this.service.getRow(importId, rowId);
   }
 }

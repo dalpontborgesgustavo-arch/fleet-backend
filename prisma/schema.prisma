@@ -76,6 +76,7 @@ model User {
   refreshTokens                   RefreshToken[]
   budgetScenarios                 BudgetScenario[]              @relation("BudgetScenarioCreatedBy")
   monthlyChecklistVehicles        Vehicle[]                     @relation("VehicleMonthlyChecklistResponsible")
+  dudaBdGeralViewPreference        DudaBdGeralViewPreference?
 
   @@index([filial])
 }
@@ -4177,4 +4178,11 @@ model DudaBdGeralRow {
   @@index([importId, legacyItem])
   @@index([importId, clientName])
   @@index([importId, workName])
+}
+
+model DudaBdGeralViewPreference {
+  userId        String   @id
+  hiddenColumns Json     @default("[]")
+  updatedAt     DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

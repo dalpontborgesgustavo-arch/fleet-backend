@@ -76,8 +76,15 @@ jobs:
       - run: npx prisma generate
       - run: npx prisma db execute --file prisma/migrations/20261019170000_add_ssma_work_cost_snapshots/migration.sql --schema prisma/schema.prisma
       - run: npx prisma db execute --file prisma/migrations/20261021170000_add_duda_bd_geral_staging/migration.sql --schema prisma/schema.prisma
+      # The real User table already exists in production. The rehearsal database
+      # is deliberately minimal, so create only the referenced key before the
+      # additive per-user preference migration.
+      - run: npx prisma db execute --file scripts/duda-bd-geral/rehearsal-user.sql --schema prisma/schema.prisma
+      - run: npx prisma db execute --file prisma/migrations/20261021210000_add_duda_bd_geral_view_preference/migration.sql --schema prisma/schema.prisma
       - run: >-
           node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();db.ssmaWorkCostSnapshot.count().then(n=>{if(n!==0)process.exitCode=1;console.log("SSMA snapshot table readable:",n);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
       - run: >-
           node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();Promise.all([db.dudaBdGeralImport.count(),db.dudaBdGeralRow.count()]).then(([imports,rows])=>{if(imports!==0||rows!==0)process.exitCode=1;console.log("Duda staging readable:",imports,rows);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
+      - run: >-
+          node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();db.dudaBdGeralViewPreference.count().then(n=>{if(n!==0)process.exitCode=1;console.log("Duda preferences readable:",n);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
       - run: node scripts/duda-bd-geral/smoke_test.mjs
