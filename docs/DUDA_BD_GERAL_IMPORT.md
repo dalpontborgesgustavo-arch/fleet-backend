@@ -21,6 +21,14 @@ instalada nesta fase. A chave da linha é `(importId, excelRow)`, não o legado
 `ITEM`, que se repete. O hash do workbook distingue snapshots, e o hash do
 JSONL impede importar um extrato alterado. A importação é idempotente.
 
+A auditoria independente do SERVER BI confirmou que a cópia principal e a
+`conflicted copy` divergem em 44 células de negócio, mesmo sem H/I, nas linhas
+1380, 1413, 1418, 1438, 1439, 1456 e 1510. O extrator marca essas linhas
+apenas quando o hash da fonte é o da principal auditada. Elas entram no
+staging bruto para conferência, **não** como valores financeiros homologados.
+É necessária decisão da Duda sobre a versão correta antes de substituir o
+Excel ou produzir relatórios consolidados a partir desse histórico.
+
 O extrator de somente leitura fica em
 `scripts/duda-bd-geral/extract_workbook.py`. O importador verifica hash da
 planilha-fonte, estrutura, 27 colunas, contagens, linhas e hashes antes de

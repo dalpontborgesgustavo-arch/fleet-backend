@@ -22,6 +22,11 @@ FIRST_BODY_ROW = 7
 LAST_BODY_ROW = 1534
 LAST_COLUMN = 29  # AC: the Excel table's end, not worksheet max_column.
 EXCLUDED_COLUMNS = {8, 9}  # H: contract value; I: contract balance (user decision).
+AUDITED_MAIN_SHA256 = "61b4b3e071f3d821cf952dc3408cc28ddac97a958d977eaeec45abb512081425"
+# Read-only SERVER BI comparison on 21/10/2026: these rows have business-value
+# differences from the conflicted copy even after removing H/I. Never use the
+# main copy as a certified financial source until Duda reconciles them.
+AUDITED_CONFLICT_ROWS = {1380, 1413, 1418, 1438, 1439, 1456, 1510}
 
 
 def serializable(value):
@@ -60,6 +65,7 @@ def canonical_json(value):
 
 def extract(source: pathlib.Path, output_dir: pathlib.Path):
     source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
+    conflict_rows = AUDITED_CONFLICT_ROWS if source_sha == AUDITED_MAIN_SHA256 else set()
     output_dir.mkdir(parents=True, exist_ok=True)
     warnings.filterwarnings("ignore", message="Unknown extension is not supported")
     formulas = openpyxl.load_workbook(source, read_only=False, data_only=False)
@@ -112,6 +118,8 @@ def extract(source: pathlib.Path, output_dir: pathlib.Path):
 
             item = text_value(ws.cell(excel_row, 1).value)
             service_month = month_value(values_ws.cell(excel_row, 2).value)
+            if excel_row in conflict_rows:
+                errors.append("conflicted_copy_business_values_differ")
             if constants == 0 and formula_count == 0:
                 classification = "blank"
             elif constants == 0:
@@ -161,6 +169,7 @@ def extract(source: pathlib.Path, output_dir: pathlib.Path):
         "excludedColumns": ["H", "I"],
         "classifications": counts,
         "cachedErrorCellCount": error_count,
+        "knownConflictExcelRows": sorted(conflict_rows),
         "rowsSha256": hashlib.sha256(rows_path.read_bytes()).hexdigest(),
         "rowHashesSha256": hashlib.sha256("\n".join(row_hashes).encode("ascii")).hexdigest(),
         "headers": {get_column_letter(index): headers[index - 1] for index in range(1, LAST_COLUMN + 1) if index not in EXCLUDED_COLUMNS},
