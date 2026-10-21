@@ -4129,3 +4129,52 @@ model LucasFleetRevenueFactAudit {
   @@index([factId, changedAt])
   @@index([syncRunId])
 }
+
+// Immutable evidence from the legacy workbook. A staged batch is not a
+// certified accounting dataset and must never be used as one by default.
+model DudaBdGeralImport {
+  id                   String              @id @default(uuid())
+  sourceWorkbookSha256 String              @unique
+  sourceLabel          String
+  capturedAt           DateTime            @db.Timestamptz(6)
+  physicalRowCount     Int
+  detailCandidateCount Int
+  status               String              @default("STAGED")
+  manifest             Json
+  createdAt            DateTime            @default(now()) @db.Timestamptz(6)
+  rows                 DudaBdGeralRow[]
+
+  @@index([status, createdAt])
+}
+
+model DudaBdGeralRow {
+  id                   String            @id @default(uuid())
+  importId             String
+  excelRow             Int
+  rowSha256            String
+  classification       String
+  hiddenByFilter       Boolean
+  legacyItem           String?
+  serviceMonth         String?
+  engineer             String?
+  contractNumber       String?
+  clientName           String?
+  municipality         String?
+  workName             String?
+  billingMonth         String?
+  expectedReceiptMonth String?
+  receivedMonthText    String?
+  // Original values, cached formula results, formulas and parse warnings stay
+  // intact so that disputed rows can be reconciled without guessing.
+  cells                Json
+  issues               Json
+  createdAt            DateTime          @default(now()) @db.Timestamptz(6)
+  import               DudaBdGeralImport @relation(fields: [importId], references: [id], onDelete: Restrict)
+
+  @@unique([importId, excelRow])
+  @@index([importId, classification, excelRow])
+  @@index([importId, serviceMonth])
+  @@index([importId, legacyItem])
+  @@index([importId, clientName])
+  @@index([importId, workName])
+}
