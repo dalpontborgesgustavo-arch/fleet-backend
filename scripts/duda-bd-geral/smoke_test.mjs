@@ -2,7 +2,7 @@
 // The generated data is entirely fictitious; no JR workbook enters GitHub.
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, rmdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,7 +57,7 @@ const manifest = {
   detailCandidateCount: 0,
   includedColumnCount: 27,
   excludedColumns: ['H', 'I'],
-  classifications: { blank: 1528 },
+  classifications: { blank: 1528, detail_candidate: 0 },
   rowsSha256: hash(rowsBytes),
   rowHashesSha256: hash(rows.map((row) => row.rowSha256).join('\n')),
 };
@@ -109,5 +109,5 @@ try {
     rm(jsonl, { force: true }),
     rm(manifestPath, { force: true }),
   ]);
-  await rm(dir, { force: true });
+  await rmdir(dir);
 }
