@@ -13,6 +13,7 @@ import { ChecklistTemplateModule } from './checklist-template/checklist-template
 import { CommercialIndicatorsModule } from './commercial-indicators/commercial-indicators.module';
 import { ConstructionControlModule } from './construction-control/construction-control.module';
 import { CostPurchasesModule } from './cost-purchases/cost-purchases.module';
+import { DudaBdGeralModule } from './duda-bd-geral/duda-bd-geral.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { EnvironmentalModule } from './environmental/environmental.module';
 import { HealthController } from './health/health.controller';
@@ -53,6 +54,7 @@ import { VehiclesModule } from './vehicles/vehicles.module';
     CommercialIndicatorsModule,
     ConstructionControlModule,
     CostPurchasesModule,
+    DudaBdGeralModule,
     ContractsModule,
     AuthModule,
     AwsBillingModule,
