@@ -43,6 +43,15 @@ export class DudaBdGeralController {
     return this.service.listImports();
   }
 
+  @Get('work-suggestions')
+  searchWorkSuggestions(
+    @Req() req: DudaAuthenticatedRequest,
+    @Query('q') query?: string,
+  ) {
+    assertDudaAdmin(req.user?.role);
+    return this.service.searchWorkSuggestions(query);
+  }
+
   @Get('imports/:importId/rows')
   listRows(
     @Req() req: DudaAuthenticatedRequest,

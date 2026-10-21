@@ -14,6 +14,8 @@ describe('DudaBdGeralService', () => {
     physicalRowCount: 1528,
   };
   const prisma = {
+    aethosObra: { findMany: jest.fn() },
+    constructionControlState: { findUnique: jest.fn() },
     dudaBdGeralImport: { findUnique: jest.fn(), findMany: jest.fn() },
     dudaBdGeralViewPreference: { findUnique: jest.fn(), upsert: jest.fn() },
     dudaBdGeralManualEntry: {
@@ -35,6 +37,8 @@ describe('DudaBdGeralService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.aethosObra.findMany.mockResolvedValue([]);
+    prisma.constructionControlState.findUnique.mockResolvedValue(null);
     prisma.dudaBdGeralImport.findUnique.mockResolvedValue(batch);
     prisma.dudaBdGeralRow.count.mockReturnValue(Promise.resolve(1));
     prisma.dudaBdGeralRow.findMany.mockReturnValue(
@@ -59,6 +63,63 @@ describe('DudaBdGeralService', () => {
         },
       ]);
   });
+
+  it('suggests only active Aethos works and clearly separates JR control fields', async () => {
+    prisma.aethosObra.findMany.mockResolvedValue([
+      {
+        code: '523',
+        name: 'Obra oficial no Aethos',
+        clientName: 'Cliente oficial',
+        syncedAt: new Date('2026-10-21T00:00:00Z'),
+      },
+    ]);
+    prisma.constructionControlState.findUnique.mockResolvedValue({
+      data: {
+        works: [{ codigoObra: '523', engenheiro: 'Maria', contrato: '58/2026' }],
+      },
+    });
+    await expect(service.searchWorkSuggestions('523')).resolves.toMatchObject([
+      {
+        code: '523',
+        suggestions: {
+          C: 'Maria', D: '58/2026', E: 'Cliente oficial',
+          G: 'Obra oficial no Aethos',
+        },
+        sources: {
+          C: 'JR_CONTROLE_OBRAS', D: 'JR_CONTROLE_OBRAS',
+          E: 'AETHOS_OBRAS', G: 'AETHOS_OBRAS',
+        },
+      },
+    ]);
+    expect(prisma.aethosObra.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ active: true }) }),
+    );
+  });
+
+  it('does not infer engineer or contract from duplicated control work codes', async () => {
+    prisma.aethosObra.findMany.mockResolvedValue([
+      { code: '523', name: 'Obra 523', clientName: 'Cliente', syncedAt: new Date() },
+    ]);
+    prisma.constructionControlState.findUnique.mockResolvedValue({
+      data: { works: [
+        { codigoObra: '523', engenheiro: 'A', contrato: '1' },
+        { codigoObra: '523', engenheiro: 'B', contrato: '2' },
+      ] },
+    });
+    await expect(service.searchWorkSuggestions('523')).resolves.toMatchObject([
+      { suggestions: { C: null, D: null, E: 'Cliente', G: 'Obra 523' } },
+    ]);
+  });
+
+  it.each(['', ' ', 'a', 'x'.repeat(81)])(
+    'rejects invalid work lookups (%s)',
+    async (query) => {
+      await expect(service.searchWorkSuggestions(query)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(prisma.aethosObra.findMany).not.toHaveBeenCalled();
+    },
+  );
 
   it('paginates the physical worksheet including hidden rows', async () => {
     const result = await service.listRows('batch-1', {
