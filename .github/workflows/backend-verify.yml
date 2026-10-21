@@ -80,3 +80,4 @@ jobs:
           node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();db.ssmaWorkCostSnapshot.count().then(n=>{if(n!==0)process.exitCode=1;console.log("SSMA snapshot table readable:",n);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
       - run: >-
           node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();Promise.all([db.dudaBdGeralImport.count(),db.dudaBdGeralRow.count()]).then(([imports,rows])=>{if(imports!==0||rows!==0)process.exitCode=1;console.log("Duda staging readable:",imports,rows);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
+      - run: node scripts/duda-bd-geral/smoke_test.mjs
