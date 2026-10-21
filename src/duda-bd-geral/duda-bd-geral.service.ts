@@ -168,6 +168,79 @@ function valuesFromCells(cells: CellMap): Record<string, string> {
 export class DudaBdGeralService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async searchWorkSuggestions(query?: string) {
+    const term = query?.trim() ?? '';
+    if (!term || term.length > 80 || (!/^\d+$/.test(term) && term.length < 2)) {
+      throw new BadRequestException('Informe o código ou ao menos 2 letras da obra');
+    }
+
+    const works = await this.prisma.aethosObra.findMany({
+      where: {
+        active: true,
+        OR: [
+          { code: { startsWith: term } },
+          { name: { contains: term, mode: 'insensitive' } },
+          { clientName: { contains: term, mode: 'insensitive' } },
+        ],
+      },
+      orderBy: { code: 'asc' },
+      take: 20,
+      select: { code: true, name: true, clientName: true, syncedAt: true },
+    });
+
+    // Construction Control is a manually maintained JR register. Its fields
+    // supplement the Aethos work only when the work code is unambiguous.
+    const state = works.length
+      ? await this.prisma.constructionControlState.findUnique({
+          where: { id: 'default' },
+          select: { data: true },
+        })
+      : null;
+    const data = state?.data;
+    const controlWorks =
+      data && typeof data === 'object' && !Array.isArray(data)
+        ? (data as Record<string, unknown>).works
+        : null;
+    const registered = Array.isArray(controlWorks) ? controlWorks : [];
+
+    return works.map((work) => {
+      const matches = registered.filter(
+        (item) =>
+          item &&
+          typeof item === 'object' &&
+          String((item as Record<string, unknown>).codigoObra ?? '').trim() ===
+            work.code,
+      );
+      const control = matches.length === 1
+        ? (matches[0] as Record<string, unknown>)
+        : null;
+      const engineer =
+        typeof control?.engenheiro === 'string'
+          ? control.engenheiro.trim()
+          : '';
+      const contract =
+        typeof control?.contrato === 'string' ? control.contrato.trim() : '';
+      return {
+        code: work.code,
+        name: work.name,
+        clientName: work.clientName,
+        syncedAt: work.syncedAt,
+        suggestions: {
+          C: engineer || null,
+          D: contract || null,
+          E: work.clientName || null,
+          G: work.name,
+        },
+        sources: {
+          C: engineer ? 'JR_CONTROLE_OBRAS' : null,
+          D: contract ? 'JR_CONTROLE_OBRAS' : null,
+          E: work.clientName ? 'AETHOS_OBRAS' : null,
+          G: 'AETHOS_OBRAS',
+        },
+      };
+    });
+  }
+
   async getViewPreferences(userId?: string) {
     if (!userId) throw new BadRequestException('Usuário inválido');
     const stored = await this.prisma.dudaBdGeralViewPreference.findUnique({
