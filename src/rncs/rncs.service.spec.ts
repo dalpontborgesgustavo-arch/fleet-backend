@@ -609,3 +609,122 @@ describe('RncsService corrective action execution evidence', () => {
     expect(notifyUsers).not.toHaveBeenCalled();
   });
 });
+
+describe('RncsService add corrective action to an ongoing plan', () => {
+  const currentRnc = (overrides: Record<string, unknown> = {}) => ({
+    id: 'rnc-108',
+    number: 108,
+    type: 'INTERNAL',
+    status: 'RESPONSIBLE_ACTION_COMPLETED',
+    engineerId: 'issuer',
+    assignments: [
+      {
+        assignedToId: 'cause-owner',
+        status: 'ANSWERED',
+        reason: 'Analise de causa e plano de acao corretiva',
+      },
+    ],
+    correctiveActions: [
+      { id: 'old-1', sequence: 1, situation: 'Concluida' },
+      { id: 'old-2', sequence: 2, situation: 'Em andamento' },
+    ],
+    ...overrides,
+  });
+
+  const makeService = (rnc = currentRnc()) => {
+    const create = jest.fn().mockResolvedValue({});
+    const historyCreate = jest.fn().mockResolvedValue({});
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: rnc.id }]),
+      user: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'new-owner',
+          name: 'Novo responsavel',
+          email: null,
+          role: 'engenharia',
+        }),
+      },
+      rncCorrectiveAction: { create },
+      rncHistory: { create: historyCreate },
+    };
+    const prisma = {
+      $transaction: jest.fn((callback: (client: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+      ),
+    };
+    const service = new RncsService(
+      prisma as any,
+      { notifyUsers: jest.fn().mockResolvedValue(undefined) } as any,
+      {} as any,
+      {} as any,
+    );
+    jest.spyOn(service as any, 'getRnc').mockResolvedValue(rnc);
+    jest.spyOn(service as any, 'ensureCanRead').mockImplementation(() => undefined);
+    jest.spyOn(service as any, 'sendInternalRncTaskEmail').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'serialize').mockImplementation((value: unknown) => value);
+    return { service, create, historyCreate, tx };
+  };
+
+  const payload = {
+    description: 'Complementar a implementacao da NC',
+    responsibleUserId: 'new-owner',
+    dueDate: '2026-11-25',
+  };
+
+  it.each(['issuer', 'cause-owner'])(
+    'lets %s append without replacing existing actions',
+    async (actorId) => {
+      const { service, create, historyCreate, tx } = makeService();
+      await service.addCorrectiveAction('rnc-108', payload, actorId, 'engenharia');
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          rncId: 'rnc-108',
+          sequence: 3,
+          description: payload.description,
+          responsibleUserId: 'new-owner',
+          situation: 'Pendente',
+        }),
+      });
+      expect(historyCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          rncId: 'rnc-108',
+          actorId,
+          action: 'UPDATED_PROGRESS',
+        }),
+      });
+    },
+  );
+
+  it('rejects an unrelated user even when they can read the RNC', async () => {
+    const { service, create } = makeService();
+    await expect(
+      service.addCorrectiveAction('rnc-108', payload, 'unrelated', 'engenharia'),
+    ).rejects.toThrow('Somente o emitente ou responsavel');
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('reopens a resolved plan before the effectiveness review', async () => {
+    const { service, create } = makeService(
+      currentRnc({
+        correctiveActions: [
+          { id: 'old-1', sequence: 1, situation: 'Concluida' },
+        ],
+      }),
+    );
+    await service.addCorrectiveAction('rnc-108', payload, 'issuer', 'engenharia');
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ sequence: 2, situation: 'Pendente' }),
+    });
+  });
+
+  it('rejects an already reviewed plan', async () => {
+    const { service, create } = makeService(
+      currentRnc({ effectivenessReviewedAt: new Date() }),
+    );
+    await expect(
+      service.addCorrectiveAction('rnc-108', payload, 'issuer', 'engenharia'),
+    ).rejects.toThrow('A avaliacao de eficacia ja foi registrada');
+    expect(create).not.toHaveBeenCalled();
+  });
+});
