@@ -2337,11 +2337,13 @@ export class RncsService {
           'Novas acoes so podem ser incluidas durante a execucao do plano',
         );
       }
-      if (
-        current.correctiveActions.length === 0 ||
-        this.correctiveActionsAreResolved(current.correctiveActions)
-      ) {
-        throw new BadRequestException('O plano de acao nao esta em andamento');
+      if (current.correctiveActions.length === 0) {
+        throw new BadRequestException('O plano de acao ainda nao foi criado');
+      }
+      if (current.effectivenessReviewedAt) {
+        throw new BadRequestException(
+          'A avaliacao de eficacia ja foi registrada para esta RNC',
+        );
       }
       const isCauseOwner = current.assignments.some(
         (assignment) =>

@@ -704,7 +704,7 @@ describe('RncsService add corrective action to an ongoing plan', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('rejects a finished plan', async () => {
+  it('reopens a resolved plan before the effectiveness review', async () => {
     const { service, create } = makeService(
       currentRnc({
         correctiveActions: [
@@ -712,9 +712,19 @@ describe('RncsService add corrective action to an ongoing plan', () => {
         ],
       }),
     );
+    await service.addCorrectiveAction('rnc-108', payload, 'issuer', 'engenharia');
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ sequence: 2, situation: 'Pendente' }),
+    });
+  });
+
+  it('rejects an already reviewed plan', async () => {
+    const { service, create } = makeService(
+      currentRnc({ effectivenessReviewedAt: new Date() }),
+    );
     await expect(
       service.addCorrectiveAction('rnc-108', payload, 'issuer', 'engenharia'),
-    ).rejects.toThrow('O plano de acao nao esta em andamento');
+    ).rejects.toThrow('A avaliacao de eficacia ja foi registrada');
     expect(create).not.toHaveBeenCalled();
   });
 });
