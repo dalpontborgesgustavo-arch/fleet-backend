@@ -20,6 +20,7 @@ import { AnswerRncAssignmentDto } from './dto/answer-rnc-assignment.dto';
 import { CancelRncDto } from './dto/cancel-rnc.dto';
 import { CompleteRncCorrectiveActionDto } from './dto/complete-rnc-corrective-action.dto';
 import { UpdateRncCorrectiveActionDto } from './dto/update-rnc-corrective-action.dto';
+import { AddRncCorrectiveActionDto } from './dto/add-rnc-corrective-action.dto';
 import { CreateRncDto } from './dto/create-rnc.dto';
 import { DirectRncDto } from './dto/direct-rnc.dto';
 import { ReviewRncEffectivenessDto } from './dto/review-rnc-effectiveness.dto';
@@ -2303,6 +2304,122 @@ export class RncsService {
     await this.s3UploadService.deleteFile(attachment.fileKey);
 
     return this.serialize(await this.getRnc(id));
+  }
+
+  async addCorrectiveAction(
+    id: string,
+    dto: AddRncCorrectiveActionDto,
+    actorId?: string | null,
+    actorRole?: string | null,
+  ) {
+    if (!actorId) {
+      throw new BadRequestException('Usuario autenticado nao encontrado');
+    }
+
+    const description = trimRequired(dto.description, 'Descricao da acao');
+    const responsibleUserId = trimRequired(
+      dto.responsibleUserId,
+      'Responsavel da acao',
+    );
+    const dueDate = parseDate(dto.dueDate, 'Prazo da acao corretiva');
+    const { sequence, responsibleUser } = await this.prisma.$transaction(async (tx) => {
+      // Serialize additions to the same plan before calculating its next sequence.
+      await tx.$queryRaw`SELECT id FROM "Rnc" WHERE id = ${id} FOR UPDATE`;
+      const current = await this.getRnc(id, tx);
+      this.ensureCanRead(current, actorRole, actorId);
+      if (current.type !== RncType.INTERNAL) {
+        throw new BadRequestException(
+          'Plano de acao se aplica apenas a RNC Interna',
+        );
+      }
+      if (current.status !== RncStatus.RESPONSIBLE_ACTION_COMPLETED) {
+        throw new BadRequestException(
+          'Novas acoes so podem ser incluidas durante a execucao do plano',
+        );
+      }
+      if (
+        current.correctiveActions.length === 0 ||
+        this.correctiveActionsAreResolved(current.correctiveActions)
+      ) {
+        throw new BadRequestException('O plano de acao nao esta em andamento');
+      }
+      const isCauseOwner = current.assignments.some(
+        (assignment) =>
+          assignment.assignedToId === actorId &&
+          assignment.status !== RncAssignmentStatus.CANCELLED &&
+          assignment.reason === RNC_CAUSE_ANALYSIS_ASSIGNMENT_REASON,
+      );
+      const canSupportAnyInternalStage =
+        isConsultantRole(actorRole) ||
+        ['admin', 'administrador'].includes(normalizeRole(actorRole));
+      if (
+        current.engineerId !== actorId &&
+        !isCauseOwner &&
+        !canSupportAnyInternalStage
+      ) {
+        throw new ForbiddenException(
+          'Somente o emitente ou responsavel pela analise de causa pode incluir acoes',
+        );
+      }
+
+      const responsibleUser = await tx.user.findFirst({
+        where: {
+          id: responsibleUserId,
+          active: true,
+          role: { notIn: ['motorista', 'operador'] },
+        },
+        select: { id: true, name: true, email: true, role: true },
+      });
+      if (!responsibleUser) {
+        throw new BadRequestException(
+          'Selecione um usuario ativo do Sistema JR como responsavel',
+        );
+      }
+
+      const nextSequence =
+        Math.max(
+          0,
+          ...current.correctiveActions.map((action) => action.sequence),
+        ) + 1;
+      await tx.rncCorrectiveAction.create({
+        data: {
+          rncId: id,
+          sequence: nextSequence,
+          description,
+          responsible: responsibleUser.name,
+          responsibleUserId: responsibleUser.id,
+          dueDate,
+          situation: 'Pendente',
+        },
+      });
+      await tx.rncHistory.create({
+        data: {
+          rncId: id,
+          actorId,
+          action: RncHistoryAction.UPDATED_PROGRESS,
+          note: `Acao corretiva ${nextSequence} adicionada ao plano: ${description}`,
+        },
+      });
+      return { sequence: nextSequence, responsibleUser };
+    });
+
+    const updatedRnc = await this.getRnc(id);
+    this.notifyUsers([responsibleUser.id], {
+      title: 'Nova acao corretiva sob sua responsabilidade',
+      body: `Voce recebeu a acao ${sequence} no plano da RNC #${updatedRnc.number}.`,
+      data: this.notificationData(updatedRnc.id),
+    });
+    await this.sendInternalRncTaskEmail(updatedRnc, responsibleUser, {
+      subject: `RNC #${updatedRnc.number} - nova acao corretiva atribuida`,
+      title: 'Nova acao no plano corretivo',
+      description:
+        'Acesse a RNC Comigo no Sistema JR para acompanhar, registrar a execucao e anexar as evidencias.',
+      items: [
+        `Acao ${sequence}: ${description} - prazo ${formatDateTime(dueDate)}`,
+      ],
+    });
+
+    return this.serialize(updatedRnc);
   }
 
   async updateCorrectiveAction(

@@ -22,6 +22,7 @@ import { CreateRncDto } from './dto/create-rnc.dto';
 import { CompleteRncCorrectiveActionDto } from './dto/complete-rnc-corrective-action.dto';
 import { CancelRncDto } from './dto/cancel-rnc.dto';
 import { UpdateRncCorrectiveActionDto } from './dto/update-rnc-corrective-action.dto';
+import { AddRncCorrectiveActionDto } from './dto/add-rnc-corrective-action.dto';
 import { AnswerRncAssignmentDto } from './dto/answer-rnc-assignment.dto';
 import { DirectRncDto } from './dto/direct-rnc.dto';
 import { ReviewRncEffectivenessDto } from './dto/review-rnc-effectiveness.dto';
@@ -153,6 +154,20 @@ export class RncsController {
     return this.rncsService.updateCorrectiveAction(
       id,
       actionId,
+      dto,
+      req.user?.sub,
+      req.user?.role,
+    );
+  }
+
+  @Post(':id/corrective-actions')
+  addCorrectiveAction(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: AddRncCorrectiveActionDto,
+  ) {
+    return this.rncsService.addCorrectiveAction(
+      id,
       dto,
       req.user?.sub,
       req.user?.role,
