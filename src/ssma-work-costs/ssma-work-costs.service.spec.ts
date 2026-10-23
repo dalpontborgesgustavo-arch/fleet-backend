@@ -110,25 +110,46 @@ describe('SsmaWorkCostsService', () => {
     );
   });
 
-  it('returns only the six scoped products to SSMA', async () => {
+  it('does not let the legacy sender replace a bathroom snapshot', async () => {
+    const prisma = makePrisma();
+    prisma.ssmaWorkCostSnapshot.findFirst.mockResolvedValueOnce({
+      generatedAt: new Date('2026-10-18T15:00:00Z'),
+      budgetCount: 1,
+      actualCount: 1,
+      budgets: [{ productCode: '1736' }],
+      actuals: [{ productCode: '1736' }],
+    } as never);
+    const service = new SsmaWorkCostsService(prisma as never);
+    await expect(service.sync(sample())).rejects.toThrow(
+      'Escopo anterior nao pode substituir',
+    );
+    expect(prisma.ssmaWorkCostSnapshot.create).not.toHaveBeenCalled();
+  });
+
+  it('returns only scoped signage and bathroom products to SSMA', async () => {
     const prisma = makePrisma();
     prisma.ssmaWorkCostSnapshot.findFirst.mockResolvedValueOnce({
       runId: 'r1',
       generatedAt: new Date('2026-10-19T15:00:00Z'),
       receivedAt: new Date('2026-10-19T15:00:01Z'),
       budgetCount: 2,
-      actualCount: 1,
+      actualCount: 2,
       payloadHash: 'hash',
       budgets: [
         { productCode: '14515', amount: '10.00' },
+        { productCode: '1736', amount: '20.00' },
         { productCode: '14519', amount: '999.00' },
       ],
-      actuals: [{ productCode: '14515', amount: '8.00' }],
+      actuals: [
+        { productCode: '14515', amount: '8.00' },
+        { productCode: '1736', amount: '5.00' },
+        { productCode: '10274', amount: '999.00' },
+      ],
     } as never);
     const service = new SsmaWorkCostsService(prisma as never);
     const result = await service.read('ssma');
-    expect(result.budgets).toHaveLength(1);
-    expect(result.actuals).toHaveLength(1);
+    expect(result.budgets).toHaveLength(2);
+    expect(result.actuals).toHaveLength(2);
     expect(result.monthlyBudgetAvailable).toBe(false);
   });
 });

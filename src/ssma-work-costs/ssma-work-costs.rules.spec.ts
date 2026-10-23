@@ -81,6 +81,23 @@ const base = () => ({
   ],
 });
 
+const expanded = () => {
+  const input = base();
+  input.productCodes.push('1736', '7764', '9953', '17946');
+  for (const row of input.budgets) {
+    Object.assign(row, {
+      isReused: false,
+      reusedSourceId: null,
+      eligibleBudgetReference: row.isOriginal,
+      referenceExclusionReason: row.isOriginal ? null : 'NOT_ORIGINAL',
+      rawAmount: row.amount,
+      amountRounding: 'DECIMAL_2_AWAY_FROM_ZERO_PER_ROW',
+      roundingDelta: row.amount === null ? null : '0',
+    });
+  }
+  return input;
+};
+
 describe('SSMA work-cost snapshot rules', () => {
   it('normalizes leading zeros and keeps null distinct from zero', () => {
     const result = normalizeSsmaWorkSnapshot(base());
@@ -90,6 +107,69 @@ describe('SSMA work-cost snapshot rules', () => {
     expect(result.budgets[0].amount).toBe('112793.60');
     expect(result.actuals[1].status).toBe('C');
     expect(result.payloadHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('preserves open appropriations for audit without treating them as finalized', () => {
+    const input = expanded();
+    input.actuals[1].productCode = '1736';
+    input.actuals[1].status = 'A';
+    expect(normalizeSsmaWorkSnapshot(input).actuals[1]).toMatchObject({
+      productCode: '1736',
+      status: 'A',
+      amount: '100.00',
+    });
+  });
+
+  it('accepts only the complete expanded bathroom and signage scope', () => {
+    const input = expanded();
+    input.budgets[0].productCode = '1736';
+    input.actuals[0].productCode = '1736';
+    const result = normalizeSsmaWorkSnapshot(input);
+    expect(result.productCodes).toEqual([
+      '13189',
+      '14515',
+      '15016',
+      '1736',
+      '17410',
+      '17411',
+      '17946',
+      '7085',
+      '7764',
+      '9953',
+    ]);
+
+    input.productCodes.pop();
+    expect(() => normalizeSsmaWorkSnapshot(input)).toThrow(
+      'escopo de produtos',
+    );
+
+    const undeclared = base();
+    undeclared.actuals[0].productCode = '1736';
+    expect(() => normalizeSsmaWorkSnapshot(undeclared)).toThrow(
+      'fora do escopo declarado',
+    );
+  });
+
+  it('audits reused budgets and verifies exact per-line rounding', () => {
+    const input = expanded();
+    Object.assign(input.budgets[0], {
+      isReused: true,
+      eligibleBudgetReference: false,
+      referenceExclusionReason: 'REUSED',
+      rawAmount: '112793.596',
+      roundingDelta: '0.004',
+    });
+    expect(normalizeSsmaWorkSnapshot(input).budgets[0]).toMatchObject({
+      isReused: true,
+      eligibleBudgetReference: false,
+      referenceExclusionReason: 'REUSED',
+      rawAmount: '112793.596',
+      roundingDelta: '0.004',
+    });
+    Object.assign(input.budgets[0], { roundingDelta: '0' });
+    expect(() => normalizeSsmaWorkSnapshot(input)).toThrow(
+      'memoria de arredondamento inconsistente',
+    );
   });
 
   it('keeps an unverified work name absent instead of inventing it', () => {

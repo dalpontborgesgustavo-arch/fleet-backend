@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 
-export const SSMA_WORK_PRODUCT_CODES = [
+export const SSMA_WORK_LEGACY_PRODUCT_CODES = [
   '7085',
   '13189',
   '14515',
@@ -9,9 +9,20 @@ export const SSMA_WORK_PRODUCT_CODES = [
   '17410',
   '17411',
 ] as const;
+export const SSMA_WORK_BATHROOM_PRODUCT_CODES = [
+  '1736',
+  '7764',
+  '9953',
+  '17946',
+] as const;
+export const SSMA_WORK_PRODUCT_CODES = [
+  ...SSMA_WORK_LEGACY_PRODUCT_CODES,
+  ...SSMA_WORK_BATHROOM_PRODUCT_CODES,
+] as const;
 const PRODUCT_SET = new Set<string>(SSMA_WORK_PRODUCT_CODES);
 const MONEY_PATTERN = /^-?\d{1,15}(?:\.\d{1,2})?$/;
 const DECIMAL_PATTERN = /^-?\d{1,15}(?:\.\d{1,6})?$/;
+const AUDIT_DECIMAL_PATTERN = /^-?\d{1,15}(?:\.\d{1,18})?$/;
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const UTC_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?Z$/;
@@ -31,6 +42,13 @@ export interface SsmaBudgetLine {
   amount: string | null;
   status: string;
   isOriginal: boolean;
+  isReused?: boolean;
+  reusedSourceId?: string | null;
+  eligibleBudgetReference?: boolean;
+  referenceExclusionReason?: 'REUSED' | 'NOT_ORIGINAL' | null;
+  rawAmount?: string | null;
+  amountRounding?: 'DECIMAL_2_AWAY_FROM_ZERO_PER_ROW';
+  roundingDelta?: string | null;
 }
 
 export interface SsmaActualLine {
@@ -41,7 +59,7 @@ export interface SsmaActualLine {
   productCode: string;
   productDescription: string;
   entryDate: string;
-  status: 'F' | 'C';
+  status: 'A' | 'F' | 'C';
   unit: string | null;
   quantity: string | null;
   unitCost: string | null;
@@ -108,11 +126,19 @@ function decimal(value: unknown, label: string, money = false): string | null {
   return parsed.toFixed(6).replace(/(?:\.0+|(\.\d*?)0+)$/, '$1');
 }
 
-function budget(value: unknown): SsmaBudgetLine {
+function auditDecimal(value: unknown, label: string): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string' || !AUDIT_DECIMAL_PATTERN.test(value)) {
+    throw new Error(label + ' invalido');
+  }
+  return new Prisma.Decimal(value).toString();
+}
+
+function budget(value: unknown, expanded: boolean): SsmaBudgetLine {
   const row = record(value, 'linha de orcamento');
   if (typeof row.isOriginal !== 'boolean')
     throw new Error('isOriginal invalido');
-  return {
+  const normalized: SsmaBudgetLine = {
     sourceId: requiredText(row.sourceId, 'sourceId', 100),
     workCode: requiredText(row.workCode, 'workCode', 60),
     workName: optionalText(row.workName, 'workName', 300),
@@ -132,12 +158,75 @@ function budget(value: unknown): SsmaBudgetLine {
     status: requiredText(row.status, 'status', 20),
     isOriginal: row.isOriginal,
   };
+  if (!expanded) return normalized;
+
+  if (typeof row.isReused !== 'boolean') throw new Error('isReused invalido');
+  if (typeof row.eligibleBudgetReference !== 'boolean') {
+    throw new Error('eligibleBudgetReference invalido');
+  }
+  const expectedEligible = normalized.isOriginal && !row.isReused;
+  const expectedReason = row.isReused
+    ? 'REUSED'
+    : normalized.isOriginal
+      ? null
+      : 'NOT_ORIGINAL';
+  if (
+    row.eligibleBudgetReference !== expectedEligible ||
+    row.referenceExclusionReason !== expectedReason
+  ) {
+    throw new Error('elegibilidade do orcamento inconsistente');
+  }
+  if (row.amountRounding !== 'DECIMAL_2_AWAY_FROM_ZERO_PER_ROW') {
+    throw new Error('regra de arredondamento invalida');
+  }
+  const rawAmount = auditDecimal(row.rawAmount, 'rawAmount');
+  const roundingDelta = auditDecimal(row.roundingDelta, 'roundingDelta');
+  if (
+    (rawAmount === null) !== (normalized.amount === null) ||
+    (rawAmount === null) !== (roundingDelta === null)
+  ) {
+    throw new Error('memoria de arredondamento incompleta');
+  }
+  if (
+    rawAmount !== null &&
+    normalized.amount !== null &&
+    roundingDelta !== null
+  ) {
+    const raw = new Prisma.Decimal(rawAmount);
+    const rounded = raw.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    if (
+      !rounded.equals(normalized.amount) ||
+      !rounded.minus(raw).equals(roundingDelta)
+    ) {
+      throw new Error('memoria de arredondamento inconsistente');
+    }
+  }
+  if (
+    !['A', 'E', 'F'].includes(normalized.status) ||
+    (normalized.status === 'F' &&
+      (normalized.isOriginal ||
+        normalized.quantity !== null ||
+        normalized.unitCost !== null ||
+        normalized.amount !== null))
+  ) {
+    throw new Error('status do orcamento invalido');
+  }
+  return {
+    ...normalized,
+    isReused: row.isReused,
+    reusedSourceId: optionalText(row.reusedSourceId, 'reusedSourceId', 100),
+    eligibleBudgetReference: row.eligibleBudgetReference,
+    referenceExclusionReason: expectedReason,
+    rawAmount,
+    amountRounding: 'DECIMAL_2_AWAY_FROM_ZERO_PER_ROW',
+    roundingDelta,
+  };
 }
 
 function actual(value: unknown): SsmaActualLine {
   const row = record(value, 'apropriacao');
   const status = requiredText(row.status, 'status', 1);
-  if (status !== 'F' && status !== 'C')
+  if (status !== 'A' && status !== 'F' && status !== 'C')
     throw new Error('status da apropriacao invalido');
   const entryDate = requiredText(row.entryDate, 'entryDate', 10);
   const parsedDay = new Date(entryDate + 'T00:00:00Z');
@@ -209,11 +298,14 @@ export function normalizeSsmaWorkSnapshot(value: unknown): SsmaWorkSnapshot {
   if (!Array.isArray(input.productCodes))
     throw new Error('productCodes invalido');
   const productCodes = input.productCodes.map(normalizeProductCode).sort();
+  const matchesScope = (scope: readonly string[]) =>
+    productCodes.length === scope.length &&
+    productCodes.every((code, index) => code === [...scope].sort()[index]);
+  // Accept the existing daily sender while the expanded sender is being cut
+  // over. A partial or mixed list is never a valid full snapshot.
   if (
-    productCodes.length !== SSMA_WORK_PRODUCT_CODES.length ||
-    productCodes.some(
-      (code, index) => code !== [...SSMA_WORK_PRODUCT_CODES].sort()[index],
-    )
+    !matchesScope(SSMA_WORK_LEGACY_PRODUCT_CODES) &&
+    !matchesScope(SSMA_WORK_PRODUCT_CODES)
   ) {
     throw new Error('escopo de produtos incompleto');
   }
@@ -228,12 +320,21 @@ export function normalizeSsmaWorkSnapshot(value: unknown): SsmaWorkSnapshot {
   ) {
     throw new Error('contagem fora dos limites da fotografia completa');
   }
+  const expanded = matchesScope(SSMA_WORK_PRODUCT_CODES);
   const budgets = input.budgets
-    .map(budget)
+    .map((row) => budget(row, expanded))
     .sort((a, b) => a.sourceId.localeCompare(b.sourceId));
   const actuals = input.actuals
     .map(actual)
     .sort((a, b) => a.sourceKey.localeCompare(b.sourceKey));
+  const declaredProducts = new Set(productCodes);
+  if (
+    [...budgets, ...actuals].some(
+      (row) => !declaredProducts.has(row.productCode),
+    )
+  ) {
+    throw new Error('linha fora do escopo declarado da fotografia');
+  }
   uniqueKeys(budgets, (row) => row.sourceId, 'linha de orcamento');
   uniqueKeys(actuals, (row) => row.sourceKey, 'apropriacao');
   const payloadHash = createHash('sha256')
