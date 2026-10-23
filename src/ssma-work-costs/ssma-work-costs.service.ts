@@ -9,6 +9,8 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   normalizeSsmaWorkSnapshot,
+  SSMA_WORK_BATHROOM_PRODUCT_CODES,
+  SSMA_WORK_LEGACY_PRODUCT_CODES,
   SSMA_WORK_PRODUCT_CODES,
   SsmaActualLine,
   SsmaBudgetLine,
@@ -54,6 +56,28 @@ export class SsmaWorkCostsService {
       if (new Date(payload.generatedAt) <= latest.generatedAt) {
         throw new ConflictException('Fotografia mais antiga que a vigente');
       }
+      // Once the expanded snapshot is live, an outdated six-product sender
+      // must not silently remove bathroom costs from the current view.
+      const previousRows = [
+        ...(Array.isArray(latest.budgets)
+          ? (latest.budgets as unknown as SsmaBudgetLine[])
+          : []),
+        ...(Array.isArray(latest.actuals)
+          ? (latest.actuals as unknown as SsmaActualLine[])
+          : []),
+      ];
+      if (
+        payload.productCodes.length === SSMA_WORK_LEGACY_PRODUCT_CODES.length &&
+        previousRows.some((line) =>
+          SSMA_WORK_BATHROOM_PRODUCT_CODES.some(
+            (code) => code === line.productCode,
+          ),
+        )
+      ) {
+        throw new ConflictException(
+          'Escopo anterior nao pode substituir a fotografia ampliada',
+        );
+      }
       if (
         payload.budgets.length < Math.ceil(latest.budgetCount * 0.7) ||
         payload.actuals.length < Math.ceil(latest.actualCount * 0.7)
@@ -95,6 +119,7 @@ export class SsmaWorkCostsService {
       return {
         snapshot: null,
         productCodes: [...SSMA_WORK_PRODUCT_CODES],
+        bathroomSnapshotAvailable: false,
         monthlyBudgetAvailable: false,
         approvedBaselineAvailable: false,
         budgets: [],
@@ -104,6 +129,7 @@ export class SsmaWorkCostsService {
     const budgets = row.budgets as unknown as SsmaBudgetLine[];
     const actuals = row.actuals as unknown as SsmaActualLine[];
     const allowed = new Set<string>(SSMA_WORK_PRODUCT_CODES);
+    const bathroomCodes = new Set<string>(SSMA_WORK_BATHROOM_PRODUCT_CODES);
     return {
       snapshot: {
         runId: row.runId,
@@ -114,6 +140,9 @@ export class SsmaWorkCostsService {
         payloadHash: row.payloadHash,
       },
       productCodes: [...SSMA_WORK_PRODUCT_CODES],
+      bathroomSnapshotAvailable: [...budgets, ...actuals].some((item) =>
+        bathroomCodes.has(item.productCode),
+      ),
       monthlyBudgetAvailable: false,
       approvedBaselineAvailable: false,
       budgetBasis: 'AETHOS_CURRENT_REGISTERED_TOTAL',
