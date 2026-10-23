@@ -4145,6 +4145,7 @@ model DudaBdGeralImport {
   createdAt            DateTime            @default(now()) @db.Timestamptz(6)
   rows                 DudaBdGeralRow[]
   manualEntries        DudaBdGeralManualEntry[]
+  observations         DudaObservation[]
 
   @@index([status, createdAt])
 }
@@ -4173,6 +4174,7 @@ model DudaBdGeralRow {
   createdAt            DateTime          @default(now()) @db.Timestamptz(6)
   import               DudaBdGeralImport @relation(fields: [importId], references: [id], onDelete: Restrict)
   manualEntry          DudaBdGeralManualEntry?
+  observations         DudaObservation[]
 
   @@unique([importId, excelRow])
   @@index([importId, classification, excelRow])
@@ -4205,6 +4207,7 @@ model DudaBdGeralManualEntry {
   import          DudaBdGeralImport              @relation(fields: [importId], references: [id], onDelete: Restrict)
   sourceRow       DudaBdGeralRow?                @relation(fields: [sourceRowId], references: [id], onDelete: Restrict)
   revisions       DudaBdGeralManualEntryRevision[]
+  observations    DudaObservation[]
 
   @@index([importId, createdAt])
 }
@@ -4222,4 +4225,49 @@ model DudaBdGeralManualEntryRevision {
 
   @@unique([entryId, version])
   @@index([entryId, changedAt])
+}
+
+// A follow-up record points to, but never moves or changes, a BD Geral row.
+// It is deliberately separate from the source workbook and financial facts.
+model DudaObservation {
+  id              String                    @id @default(uuid())
+  importId        String
+  sourceRowId     String?
+  manualEntryId   String?
+  kind            String
+  referenceMonth  String
+  targetMonth     String?
+  note            String
+  status          String                    @default("OPEN")
+  rowSnapshot     Json
+  version         Int                       @default(1)
+  createdByUserId String
+  updatedByUserId String
+  createdAt       DateTime                  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime                  @updatedAt @db.Timestamptz(6)
+  resolvedAt      DateTime?                 @db.Timestamptz(6)
+  import          DudaBdGeralImport         @relation(fields: [importId], references: [id], onDelete: Restrict)
+  sourceRow       DudaBdGeralRow?           @relation(fields: [sourceRowId], references: [id], onDelete: Restrict)
+  manualEntry     DudaBdGeralManualEntry?   @relation(fields: [manualEntryId], references: [id], onDelete: Restrict)
+  revisions       DudaObservationRevision[]
+
+  @@unique([sourceRowId, kind, referenceMonth])
+  @@unique([manualEntryId, kind, referenceMonth])
+  @@index([importId, status, referenceMonth])
+  @@index([importId, kind, referenceMonth])
+}
+
+model DudaObservationRevision {
+  id              String           @id @default(uuid())
+  observationId   String
+  version         Int
+  action          String
+  before          Json?
+  after           Json
+  changedByUserId String
+  changedAt       DateTime         @default(now()) @db.Timestamptz(6)
+  observation     DudaObservation  @relation(fields: [observationId], references: [id], onDelete: Restrict)
+
+  @@unique([observationId, version])
+  @@index([observationId, changedAt])
 }
