@@ -2,8 +2,15 @@ import { ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CostPurchasesSyncService } from './cost-purchases-sync.service';
 
-function fact(sourceRecordId: string, aethosItemId = 3024) {
+function fact(
+  sourceRecordId: string,
+  aethosItemId = 3024,
+  sourceCompanyId: '1' | '4' = '1',
+) {
   return {
+    companyId: sourceCompanyId === '1' ? 'JR_CONSTRUCOES' : 'PEDRA_FORTE_LTDA',
+    unitId:
+      sourceCompanyId === '1' ? 'AETHOS_ID_EMPRESA_1' : 'AETHOS_ID_EMPRESA_4',
     sourceRecordId,
     sourceHeaderId: sourceRecordId.split('|')[1],
     sourceItemId: '2',
@@ -23,11 +30,15 @@ function fact(sourceRecordId: string, aethosItemId = 3024) {
 }
 
 function inventory(rows: ReturnType<typeof fact>[]) {
-  return rows.map(({ sourceRecordId, updatedAt, contentHash }) => ({
-    sourceRecordId,
-    updatedAt,
-    contentHash,
-  }));
+  return rows.map(
+    ({ companyId, unitId, sourceRecordId, updatedAt, contentHash }) => ({
+      companyId,
+      unitId,
+      sourceRecordId,
+      updatedAt,
+      contentHash,
+    }),
+  );
 }
 
 function setup(responses: unknown[][]) {
@@ -85,6 +96,8 @@ describe('inventario de notas de oleo conhecidas pelo JR', () => {
       contentHash: 'a'.repeat(64),
       rowVersion: `2026-10-22T22:00:00.000Z/${'a'.repeat(64)}`,
     });
+    expect(result.rows[0]).not.toHaveProperty('companyId');
+    expect(result.rows[0]).not.toHaveProperty('unitId');
     expect(result.snapshotId).toMatch(/^[0-9a-f]{64}$/);
     expect(result.contentHashAlgorithm).toBe('sha256-canonical-normalized-v1');
     expect(result.totalRows).toBe(3);
@@ -162,7 +175,7 @@ describe('inventario de todos os itens gerenciais conhecidos pelo JR', () => {
   const rows = [
     fact('NFENTRADA|115098|ITEM|2', 3024),
     fact('NFENTRADA|115856|ITEM|2', 1813),
-    fact('NFENTRADA|115900|ITEM|2', 4816),
+    fact('NFENTRADA|115900|ITEM|2', 4816, '4'),
   ];
 
   it('pagina categorias diferentes sem limitar ao oleo', async () => {
@@ -182,12 +195,35 @@ describe('inventario de todos os itens gerenciais conhecidos pelo JR', () => {
       }),
     );
     expect(first.scope).toEqual({
-      sourceCompanyIds: ['1'],
+      sourceCompanyIds: ['1', '4'],
       aethosItemIds: null,
     });
     expect(first.category).toBe('ALL');
     expect(first.rows.map((row) => row.aethosItemId)).toEqual([3024, 1813]);
     expect(last.rows.map((row) => row.aethosItemId)).toEqual([4816]);
+    expect(last.rows[0]).toMatchObject({
+      sourceCompanyId: '4',
+      companyId: 'PEDRA_FORTE_LTDA',
+      unitId: 'AETHOS_ID_EMPRESA_4',
+    });
+    expect(findMany).toHaveBeenNthCalledWith(
+      4,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: [
+            {
+              OR: [
+                { companyId: { gt: 'JR_CONSTRUCOES' } },
+                {
+                  companyId: 'JR_CONSTRUCOES',
+                  sourceRecordId: { gt: 'NFENTRADA|115856|ITEM|2' },
+                },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
     expect(last.snapshotId).toBe(first.snapshotId);
     expect(first.totalRows).toBe(3);
     expect(last.hasMore).toBe(false);
@@ -199,6 +235,25 @@ describe('inventario de todos os itens gerenciais conhecidos pelo JR', () => {
 
     await expect(
       service.knownManagerialEntries(oil.nextCursor!, '2'),
-    ).rejects.toThrow(ConflictException);
+    ).rejects.toThrow('cursor invalido');
+  });
+
+  it('pagina a mesma chave em empresas distintas sem perder registros', async () => {
+    const sharedId = 'NFENTRADA|115098|ITEM|2';
+    const both = [fact(sharedId, 3024, '1'), fact(sharedId, 3024, '4')];
+    const { service } = setup([
+      inventory(both),
+      both,
+      inventory(both),
+      [both[1]],
+    ]);
+
+    const first = await service.knownManagerialEntries(undefined, '1');
+    const second = await service.knownManagerialEntries(first.nextCursor!, '1');
+
+    expect(first.rows[0].sourceCompanyId).toBe('1');
+    expect(second.rows[0].sourceCompanyId).toBe('4');
+    expect(first.rows[0].sourceRecordId).toBe(second.rows[0].sourceRecordId);
+    expect(second.hasMore).toBe(false);
   });
 });

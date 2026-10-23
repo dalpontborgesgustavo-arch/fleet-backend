@@ -51,6 +51,7 @@ type AsphaltMapping = {
 
 type KnownOilCursor = {
   after: string;
+  afterCompanyId?: string;
   snapshotId: string;
   generatedAt: string;
   limit: number;
@@ -125,6 +126,10 @@ export class CostPurchasesSyncService {
       if (
         !continuation ||
         !/^NFENTRADA\|[0-9]+\|ITEM\|[0-9]+$/.test(continuation.after) ||
+        (!oilOnly &&
+          !['JR_CONSTRUCOES', 'PEDRA_FORTE_LTDA'].includes(
+            continuation.afterCompanyId ?? '',
+          )) ||
         !/^[0-9a-f]{64}$/.test(continuation.snapshotId) ||
         !Number.isFinite(Date.parse(continuation.generatedAt)) ||
         !Number.isInteger(continuation.limit) ||
@@ -144,18 +149,42 @@ export class CostPurchasesSyncService {
     }
     const where = {
       source: 'AETHOS',
-      companyId: 'JR_CONSTRUCOES',
-      unitId: 'AETHOS_ID_EMPRESA_1',
       dataset: COST_PURCHASE_MANAGERIAL_ENTRY_DATASET,
-      ...(oilOnly ? { aethosItemId: 3024 } : {}),
       active: true,
+      ...(oilOnly
+        ? {
+            companyId: 'JR_CONSTRUCOES',
+            unitId: 'AETHOS_ID_EMPRESA_1',
+            aethosItemId: 3024,
+          }
+        : {
+            OR: [
+              {
+                companyId: 'JR_CONSTRUCOES',
+                unitId: 'AETHOS_ID_EMPRESA_1',
+              },
+              {
+                companyId: 'PEDRA_FORTE_LTDA',
+                unitId: 'AETHOS_ID_EMPRESA_4',
+              },
+            ],
+          }),
     } as const;
+    const orderBy = oilOnly
+      ? [{ sourceRecordId: 'asc' as const }]
+      : [
+          { companyId: 'asc' as const },
+          { unitId: 'asc' as const },
+          { sourceRecordId: 'asc' as const },
+        ];
     return this.prisma.$transaction(
       async (tx) => {
         const inventory = await tx.costPurchaseManagerialEntryFact.findMany({
           where,
-          orderBy: { sourceRecordId: 'asc' },
+          orderBy,
           select: {
+            companyId: true,
+            unitId: true,
             sourceRecordId: true,
             updatedAt: true,
             contentHash: true,
@@ -164,6 +193,9 @@ export class CostPurchasesSyncService {
         const snapshotId = hashCanonicalValue({
           scope: oilOnly ? 'oil' : 'all',
           rows: inventory.map((fact) => ({
+            ...(oilOnly
+              ? {}
+              : { companyId: fact.companyId, unitId: fact.unitId }),
             sourceRecordId: fact.sourceRecordId,
             updatedAt: fact.updatedAt.toISOString(),
             contentHash: fact.contentHash,
@@ -180,12 +212,32 @@ export class CostPurchasesSyncService {
           where: {
             ...where,
             ...(continuation
-              ? { sourceRecordId: { gt: continuation.after } }
+              ? oilOnly
+                ? { sourceRecordId: { gt: continuation.after } }
+                : {
+                    AND: [
+                      {
+                        OR: [
+                          {
+                            companyId: {
+                              gt: continuation.afterCompanyId!,
+                            },
+                          },
+                          {
+                            companyId: continuation.afterCompanyId!,
+                            sourceRecordId: { gt: continuation.after },
+                          },
+                        ],
+                      },
+                    ],
+                  }
               : {}),
           },
-          orderBy: { sourceRecordId: 'asc' },
+          orderBy,
           take: limit + 1,
           select: {
+            companyId: true,
+            unitId: true,
             sourceRecordId: true,
             sourceHeaderId: true,
             sourceItemId: true,
@@ -209,6 +261,9 @@ export class CostPurchasesSyncService {
           ? Buffer.from(
               JSON.stringify({
                 after: page[page.length - 1].sourceRecordId,
+                ...(oilOnly
+                  ? {}
+                  : { afterCompanyId: page[page.length - 1].companyId }),
                 snapshotId,
                 generatedAt,
                 limit,
@@ -223,21 +278,25 @@ export class CostPurchasesSyncService {
           dataset: COST_PURCHASE_MANAGERIAL_ENTRY_DATASET,
           category: oilOnly ? 'OLEO_RESIVALE' : 'ALL',
           scope: {
-            sourceCompanyIds: ['1'],
+            sourceCompanyIds: oilOnly ? ['1'] : ['1', '4'],
             aethosItemIds: oilOnly ? ['3024'] : null,
           },
           totalRows: inventory.length,
-          rows: page.map((fact) => ({
-            sourceCompanyId: '1',
-            ...fact,
-            status: fact.sourceStatus,
-            active: true,
-            documentDate: fact.documentDate.toISOString().slice(0, 10),
-            quantity: fact.quantity?.toString() ?? null,
-            totalValue: fact.totalValue.toString(),
-            updatedAt: fact.updatedAt.toISOString(),
-            rowVersion: `${fact.updatedAt.toISOString()}/${fact.contentHash}`,
-          })),
+          rows: page.map((fact) => {
+            const { companyId, unitId, ...fields } = fact;
+            return {
+              sourceCompanyId: companyId === 'JR_CONSTRUCOES' ? '1' : '4',
+              ...(oilOnly ? {} : { companyId, unitId }),
+              ...fields,
+              status: fact.sourceStatus,
+              active: true,
+              documentDate: fact.documentDate.toISOString().slice(0, 10),
+              quantity: fact.quantity?.toString() ?? null,
+              totalValue: fact.totalValue.toString(),
+              updatedAt: fact.updatedAt.toISOString(),
+              rowVersion: `${fact.updatedAt.toISOString()}/${fact.contentHash}`,
+            };
+          }),
           hasMore,
           nextCursor,
         };
