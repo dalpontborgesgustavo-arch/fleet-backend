@@ -67,6 +67,38 @@ describe('cancelamentos do gerencial de compras', () => {
     );
   });
 
+  it('aceita cancelamento somente de fato conhecido sem mudar o hash financeiro', () => {
+    const normal = normalize({ ...baseRow, status: 'C', active: false });
+    const protectedRow = normalize({
+      ...baseRow,
+      status: 'C',
+      active: false,
+      onlyIfExists: true,
+      expectedContentHash: 'a'.repeat(64),
+      expectedUpdatedAt: '2026-10-22T22:00:00.000Z',
+    });
+    expect(protectedRow.rejected).toEqual([]);
+    expect(protectedRow.accepted[0]).toMatchObject({
+      onlyIfExists: true,
+      sourceStatus: 'C',
+      active: false,
+    });
+    expect(protectedRow.accepted[0].contentHash).toBe(
+      normal.accepted[0].contentHash,
+    );
+    expect(
+      normalize({ ...baseRow, onlyIfExists: true }).rejected[0].reason,
+    ).toContain('onlyIfExists exige status C');
+    expect(
+      normalize({
+        ...baseRow,
+        status: 'C',
+        active: false,
+        onlyIfExists: true,
+      }).rejected[0].reason,
+    ).toContain('expectedContentHash e expectedUpdatedAt');
+  });
+
   it.each([
     [{ ...baseRow, status: 'C', active: true }, 'active diverge'],
     [{ ...baseRow, status: 'F', active: false }, 'active diverge'],
@@ -126,7 +158,12 @@ describe('cancelamentos do gerencial de compras', () => {
     ).toBe(true);
     expect(
       protectsManagerialFactFromLegacyRow(existing, {
-        raw: { ...baseRow, orderId: null, orderItemId: null, orderStatus: null },
+        raw: {
+          ...baseRow,
+          orderId: null,
+          orderItemId: null,
+          orderStatus: null,
+        },
         sourceStatus: 'F',
       }),
     ).toBe(false);
@@ -147,7 +184,12 @@ describe('cancelamentos do gerencial de compras', () => {
     ).toBe(true);
     expect(
       protectsManagerialFactFromLegacyRow(existing, {
-        raw: { ...baseRow, orderId: null, orderItemId: null, orderStatus: null },
+        raw: {
+          ...baseRow,
+          orderId: null,
+          orderItemId: null,
+          orderStatus: null,
+        },
         sourceStatus: 'F',
       }),
     ).toBe(false);

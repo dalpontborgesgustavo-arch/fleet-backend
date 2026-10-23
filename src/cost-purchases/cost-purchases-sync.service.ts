@@ -49,6 +49,13 @@ type AsphaltMapping = {
   updatedAt: Date;
 };
 
+type KnownOilCursor = {
+  after: string;
+  snapshotId: string;
+  generatedAt: string;
+  limit: number;
+};
+
 function asphaltMappings(mappings: AsphaltMapping[]) {
   const categories = new Set(['CAP', 'RR', 'SEMI_IMPRIMA']);
   return mappings.filter((mapping) => categories.has(mapping.category));
@@ -86,6 +93,143 @@ export class CostPurchasesSyncService {
 
   syncManagerialEntries(body: unknown) {
     return this.sync(body, COST_PURCHASE_MANAGERIAL_ENTRY_DATASET);
+  }
+
+  // The sender uses this read-only inventory to check source cancellations
+  // only for oil notes that have already been imported into JR. Absence from
+  // this inventory must never be interpreted as a cancellation.
+  async knownManagerialOilEntries(cursor?: string, pageSize?: string) {
+    if (pageSize !== undefined && !/^[0-9]{1,3}$/.test(pageSize)) {
+      throw new BadRequestException('pageSize invalido');
+    }
+    let continuation: KnownOilCursor | null = null;
+    if (cursor !== undefined) {
+      try {
+        if (cursor.length > 1024) throw new Error('cursor longo');
+        continuation = JSON.parse(
+          Buffer.from(cursor, 'base64url').toString('utf8'),
+        ) as KnownOilCursor;
+      } catch {
+        throw new BadRequestException('cursor invalido');
+      }
+      if (
+        !continuation ||
+        !/^NFENTRADA\|[0-9]+\|ITEM\|[0-9]+$/.test(continuation.after) ||
+        !/^[0-9a-f]{64}$/.test(continuation.snapshotId) ||
+        !Number.isFinite(Date.parse(continuation.generatedAt)) ||
+        !Number.isInteger(continuation.limit) ||
+        continuation.limit < 1 ||
+        continuation.limit > 500
+      ) {
+        throw new BadRequestException('cursor invalido');
+      }
+    }
+    const limit =
+      pageSize === undefined ? (continuation?.limit ?? 250) : Number(pageSize);
+    if (limit < 1 || limit > 500) {
+      throw new BadRequestException('pageSize deve estar entre 1 e 500');
+    }
+    if (continuation && continuation.limit !== limit) {
+      throw new BadRequestException('pageSize diverge do cursor');
+    }
+    const where = {
+      source: 'AETHOS',
+      companyId: 'JR_CONSTRUCOES',
+      unitId: 'AETHOS_ID_EMPRESA_1',
+      dataset: COST_PURCHASE_MANAGERIAL_ENTRY_DATASET,
+      aethosItemId: 3024,
+      active: true,
+    } as const;
+    return this.prisma.$transaction(
+      async (tx) => {
+        const inventory = await tx.costPurchaseManagerialEntryFact.findMany({
+          where,
+          orderBy: { sourceRecordId: 'asc' },
+          select: {
+            sourceRecordId: true,
+            updatedAt: true,
+            contentHash: true,
+          },
+        });
+        const snapshotId = hashCanonicalValue(
+          inventory.map((fact) => ({
+            sourceRecordId: fact.sourceRecordId,
+            updatedAt: fact.updatedAt.toISOString(),
+            contentHash: fact.contentHash,
+          })),
+        );
+        if (continuation && continuation.snapshotId !== snapshotId) {
+          throw new ConflictException(
+            'inventario de oleo alterado durante a paginacao',
+          );
+        }
+        const generatedAt =
+          continuation?.generatedAt ?? new Date().toISOString();
+        const facts = await tx.costPurchaseManagerialEntryFact.findMany({
+          where: {
+            ...where,
+            ...(continuation
+              ? { sourceRecordId: { gt: continuation.after } }
+              : {}),
+          },
+          orderBy: { sourceRecordId: 'asc' },
+          take: limit + 1,
+          select: {
+            sourceRecordId: true,
+            sourceHeaderId: true,
+            sourceItemId: true,
+            documentDate: true,
+            documentNumber: true,
+            sourceStatus: true,
+            sourceOrderId: true,
+            sourceOrderItemId: true,
+            sourceOrderStatus: true,
+            aethosItemId: true,
+            unit: true,
+            quantity: true,
+            totalValue: true,
+            updatedAt: true,
+            contentHash: true,
+          },
+        });
+        const hasMore = facts.length > limit;
+        const page = facts.slice(0, limit);
+        const nextCursor = hasMore
+          ? Buffer.from(
+              JSON.stringify({
+                after: page[page.length - 1].sourceRecordId,
+                snapshotId,
+                generatedAt,
+                limit,
+              }),
+            ).toString('base64url')
+          : null;
+        return {
+          schemaVersion: 1,
+          snapshotId,
+          generatedAt,
+          contentHashAlgorithm: 'sha256-canonical-normalized-v1',
+          dataset: COST_PURCHASE_MANAGERIAL_ENTRY_DATASET,
+          category: 'OLEO_RESIVALE',
+          scope: { sourceCompanyIds: ['1'], aethosItemIds: ['3024'] },
+          totalRows: inventory.length,
+          rows: page.map((fact) => ({
+            sourceCompanyId: '1',
+            ...fact,
+            status: fact.sourceStatus,
+            active: true,
+            documentDate: fact.documentDate.toISOString().slice(0, 10),
+            quantity: fact.quantity?.toString() ?? null,
+            totalValue: fact.totalValue.toString(),
+            updatedAt: fact.updatedAt.toISOString(),
+            rowVersion: `${fact.updatedAt.toISOString()}/${fact.contentHash}`,
+          })),
+          hasMore,
+          nextCursor,
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
   }
 
   // A status observation never imports a fact or changes its financial data.
@@ -1189,13 +1333,48 @@ export class CostPurchasesSyncService {
           });
           const managerialRow = row as typeof row & {
             sourceStatus: string;
+            sourceHeaderId: string;
+            sourceItemId: string;
+            documentNumber: string | null;
+            aethosItemId: number;
             unit: string | null;
+            quantity: Prisma.Decimal | null;
+            totalValue: Prisma.Decimal;
+            sourceOrderId: string | null;
+            sourceOrderItemId: string | null;
+            sourceOrderStatus: string | null;
+            onlyIfExists: boolean;
+            expectedContentHash: string | null;
+            expectedUpdatedAt: Date | null;
           };
+          if (
+            dataset === COST_PURCHASE_MANAGERIAL_ENTRY_DATASET &&
+            managerialRow.onlyIfExists &&
+            envelope.syncMode !== 'incremental'
+          ) {
+            throw new BadRequestException(
+              'onlyIfExists exige syncMode incremental',
+            );
+          }
+          if (
+            dataset === COST_PURCHASE_MANAGERIAL_ENTRY_DATASET &&
+            managerialRow.onlyIfExists &&
+            !existing
+          ) {
+            throw new ConflictException(
+              `cancelamento exige fato existente: ${row.sourceRecordId}`,
+            );
+          }
           if (
             dataset === COST_PURCHASE_MANAGERIAL_ENTRY_DATASET &&
             existing &&
             protectsManagerialFactFromLegacyRow(existing, managerialRow)
           ) {
+            if (managerialRow.onlyIfExists) {
+              throw new ConflictException(
+                `contrato de cancelamento incompleto: ${row.sourceRecordId}`,
+              );
+            }
             if (
               managerialRow.sourceStatus === 'C' &&
               existing.sourceStatus !== 'C'
@@ -1232,6 +1411,11 @@ export class CostPurchasesSyncService {
               previousRun &&
               previousRun.generatedAt.getTime() > envelope.generatedAt.getTime()
             ) {
+              if (managerialRow.onlyIfExists) {
+                throw new ConflictException(
+                  `cancelamento antigo: ${row.sourceRecordId}`,
+                );
+              }
               staleIgnored += 1;
               continue;
             }
@@ -1243,10 +1427,108 @@ export class CostPurchasesSyncService {
               (existing.contentHash !== row.contentHash ||
                 existing.active !== row.active)
             ) {
+              if (managerialRow.onlyIfExists) {
+                throw new ConflictException(
+                  `mesmo timestamp com status divergente: ${row.sourceRecordId}`,
+                );
+              }
               throw new BadRequestException(
                 'cargas gerenciais com generatedAt igual e conteudo divergente',
               );
             }
+          }
+          if (
+            dataset === COST_PURCHASE_MANAGERIAL_ENTRY_DATASET &&
+            managerialRow.onlyIfExists
+          ) {
+            const current = existing!;
+            if (
+              current.contentHash !== managerialRow.expectedContentHash ||
+              current.updatedAt.getTime() !==
+                managerialRow.expectedUpdatedAt!.getTime()
+            ) {
+              throw new ConflictException(
+                `preimagem de cancelamento alterada: ${row.sourceRecordId}`,
+              );
+            }
+            if (
+              current.sourceHeaderId !== managerialRow.sourceHeaderId ||
+              current.sourceItemId !== managerialRow.sourceItemId ||
+              current.documentDate.getTime() !== row.documentDate.getTime() ||
+              current.competence.getTime() !== row.competence.getTime() ||
+              current.documentNumber !== managerialRow.documentNumber ||
+              current.aethosItemId !== managerialRow.aethosItemId ||
+              current.unit !== managerialRow.unit ||
+              (current.quantity?.toString() ?? null) !==
+                (managerialRow.quantity?.toString() ?? null) ||
+              current.totalValue.toString() !==
+                managerialRow.totalValue.toString()
+            ) {
+              throw new ConflictException(
+                `dados financeiros divergentes: ${row.sourceRecordId}`,
+              );
+            }
+            const sameStatus =
+              current.sourceStatus === managerialRow.sourceStatus &&
+              current.active === row.active &&
+              current.sourceOrderId === managerialRow.sourceOrderId &&
+              current.sourceOrderItemId === managerialRow.sourceOrderItemId &&
+              current.sourceOrderStatus === managerialRow.sourceOrderStatus &&
+              current.contentHash === row.contentHash;
+            if (sameStatus) {
+              unchanged += 1;
+              continue;
+            }
+            const previousRaw =
+              current.raw &&
+              typeof current.raw === 'object' &&
+              !Array.isArray(current.raw)
+                ? (current.raw as Record<string, unknown>)
+                : {};
+            const result = await tx.costPurchaseManagerialEntryFact.updateMany({
+              where: {
+                id: current.id,
+                updatedAt: managerialRow.expectedUpdatedAt!,
+                contentHash: managerialRow.expectedContentHash!,
+              },
+              data: {
+                sourceStatus: managerialRow.sourceStatus,
+                active: row.active,
+                sourceOrderId: managerialRow.sourceOrderId,
+                sourceOrderItemId: managerialRow.sourceOrderItemId,
+                sourceOrderStatus: managerialRow.sourceOrderStatus,
+                contentHash: row.contentHash,
+                raw: snapshot({
+                  ...previousRaw,
+                  ...(row.raw as Record<string, unknown>),
+                }),
+                deactivatedAt: current.deactivatedAt ?? now,
+                deactivationReason: 'SOURCE_CANCELLED',
+                lastSeenRunId: run.id,
+                syncedAt: now,
+              },
+            });
+            if (result.count !== 1) {
+              throw new ConflictException(
+                `cancelamento concorrente: ${row.sourceRecordId}`,
+              );
+            }
+            const updated =
+              await tx.costPurchaseManagerialEntryFact.findUniqueOrThrow({
+                where: { id: current.id },
+              });
+            await tx.costPurchaseManagerialEntryFactAudit.create({
+              data: {
+                factId: current.id,
+                operation: current.active ? 'DEACTIVATE' : 'UPDATE',
+                syncRunId: envelope.syncRunId,
+                beforeData: snapshot(current),
+                afterData: snapshot(updated),
+              },
+            });
+            upserted += 1;
+            if (current.active) deactivated += 1;
+            continue;
           }
           const data = this.factData(dataset, row, envelope, run.id, now);
           if (!existing) {
@@ -1408,4 +1690,3 @@ export class CostPurchasesSyncService {
     );
   }
 }
-

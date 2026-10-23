@@ -466,6 +466,28 @@ function normalizeManagerialEntryRow(value: unknown, scope: Scope) {
   if (active !== (sourceStatus === 'F')) {
     throw new BadRequestException('active diverge do status da nota');
   }
+  const onlyIfExists =
+    row.onlyIfExists === undefined
+      ? false
+      : optionalBoolean(row.onlyIfExists, 'onlyIfExists');
+  if (onlyIfExists && sourceStatus !== 'C') {
+    throw new BadRequestException('onlyIfExists exige status C');
+  }
+  const expectedContentHash = optionalText(row.expectedContentHash, 64);
+  const expectedUpdatedAt =
+    row.expectedUpdatedAt === undefined || row.expectedUpdatedAt === null
+      ? null
+      : instant(row.expectedUpdatedAt, 'expectedUpdatedAt');
+  if (
+    onlyIfExists &&
+    (!expectedContentHash ||
+      !/^[0-9a-f]{64}$/.test(expectedContentHash) ||
+      !expectedUpdatedAt)
+  ) {
+    throw new BadRequestException(
+      'onlyIfExists exige expectedContentHash e expectedUpdatedAt',
+    );
+  }
   const sourceOrderId = optionalText(
     row.orderId ?? row.sourceOrderId ?? row.ID_ORDEMCOMPRA,
     120,
@@ -518,6 +540,9 @@ function normalizeManagerialEntryRow(value: unknown, scope: Scope) {
   };
   return {
     ...normalized,
+    onlyIfExists,
+    expectedContentHash,
+    expectedUpdatedAt,
     contentHash: hashCanonicalValue({
       ...normalized,
       documentDate: documentDate.toISOString().slice(0, 10),

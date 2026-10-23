@@ -160,6 +160,20 @@ export class AethosIntegrationController {
     return this.costPurchasesSyncService.syncManagerialEntries(body);
   }
 
+  @Get('cost-purchases/managerial-entry-items/known-oil')
+  knownManagerialOilEntries(
+    @Headers('x-aethos-sync-token') token: string | string[] | undefined,
+    @Headers('authorization') authorization: string | undefined,
+    @Query('cursor') cursor?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    this.service.assertToken(token, authorization);
+    return this.costPurchasesSyncService.knownManagerialOilEntries(
+      cursor,
+      pageSize,
+    );
+  }
+
   @Get('cost-purchases/managerial-entry-items/reconciliation')
   async managerialEntryReconciliation(
     @Headers('x-aethos-sync-token') token: string | string[] | undefined,
@@ -476,4 +490,3 @@ export class AethosIntegrationController {
     return this.service.uploadContractAttachmentFile(idAnexoAethos, file);
   }
 }
-
