@@ -174,6 +174,20 @@ export class AethosIntegrationController {
     );
   }
 
+  @Get('cost-purchases/managerial-entry-items/known-active')
+  knownManagerialEntries(
+    @Headers('x-aethos-sync-token') token: string | string[] | undefined,
+    @Headers('authorization') authorization: string | undefined,
+    @Query('cursor') cursor?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    this.service.assertToken(token, authorization);
+    return this.costPurchasesSyncService.knownManagerialEntries(
+      cursor,
+      pageSize,
+    );
+  }
+
   @Get('cost-purchases/managerial-entry-items/reconciliation')
   async managerialEntryReconciliation(
     @Headers('x-aethos-sync-token') token: string | string[] | undefined,
