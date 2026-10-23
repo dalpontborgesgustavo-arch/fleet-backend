@@ -98,7 +98,17 @@ export class CostPurchasesSyncService {
   // The sender uses this read-only inventory to check source cancellations
   // only for oil notes that have already been imported into JR. Absence from
   // this inventory must never be interpreted as a cancellation.
-  async knownManagerialOilEntries(cursor?: string, pageSize?: string) {
+  knownManagerialOilEntries(cursor?: string, pageSize?: string) {
+    return this.knownManagerialEntries(cursor, pageSize, true);
+  }
+
+  // Covers every active managerial item already known to JR. The oil-only
+  // route remains available for clients that use its narrower inventory.
+  async knownManagerialEntries(
+    cursor?: string,
+    pageSize?: string,
+    oilOnly = false,
+  ) {
     if (pageSize !== undefined && !/^[0-9]{1,3}$/.test(pageSize)) {
       throw new BadRequestException('pageSize invalido');
     }
@@ -137,7 +147,7 @@ export class CostPurchasesSyncService {
       companyId: 'JR_CONSTRUCOES',
       unitId: 'AETHOS_ID_EMPRESA_1',
       dataset: COST_PURCHASE_MANAGERIAL_ENTRY_DATASET,
-      aethosItemId: 3024,
+      ...(oilOnly ? { aethosItemId: 3024 } : {}),
       active: true,
     } as const;
     return this.prisma.$transaction(
@@ -151,13 +161,14 @@ export class CostPurchasesSyncService {
             contentHash: true,
           },
         });
-        const snapshotId = hashCanonicalValue(
-          inventory.map((fact) => ({
+        const snapshotId = hashCanonicalValue({
+          scope: oilOnly ? 'oil' : 'all',
+          rows: inventory.map((fact) => ({
             sourceRecordId: fact.sourceRecordId,
             updatedAt: fact.updatedAt.toISOString(),
             contentHash: fact.contentHash,
           })),
-        );
+        });
         if (continuation && continuation.snapshotId !== snapshotId) {
           throw new ConflictException(
             'inventario de oleo alterado durante a paginacao',
@@ -210,8 +221,11 @@ export class CostPurchasesSyncService {
           generatedAt,
           contentHashAlgorithm: 'sha256-canonical-normalized-v1',
           dataset: COST_PURCHASE_MANAGERIAL_ENTRY_DATASET,
-          category: 'OLEO_RESIVALE',
-          scope: { sourceCompanyIds: ['1'], aethosItemIds: ['3024'] },
+          category: oilOnly ? 'OLEO_RESIVALE' : 'ALL',
+          scope: {
+            sourceCompanyIds: ['1'],
+            aethosItemIds: oilOnly ? ['3024'] : null,
+          },
           totalRows: inventory.length,
           rows: page.map((fact) => ({
             sourceCompanyId: '1',

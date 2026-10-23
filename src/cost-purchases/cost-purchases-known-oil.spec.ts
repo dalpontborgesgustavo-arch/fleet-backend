@@ -2,7 +2,7 @@ import { ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CostPurchasesSyncService } from './cost-purchases-sync.service';
 
-function fact(sourceRecordId: string) {
+function fact(sourceRecordId: string, aethosItemId = 3024) {
   return {
     sourceRecordId,
     sourceHeaderId: sourceRecordId.split('|')[1],
@@ -13,7 +13,7 @@ function fact(sourceRecordId: string) {
     sourceOrderId: null,
     sourceOrderItemId: null,
     sourceOrderStatus: null,
-    aethosItemId: 3024,
+    aethosItemId,
     unit: 'TN',
     quantity: new Prisma.Decimal('13.5'),
     totalValue: new Prisma.Decimal('55215'),
@@ -155,5 +155,50 @@ describe('inventario de notas de oleo conhecidas pelo JR', () => {
       service.knownManagerialOilEntries(cursor, pageSize),
     ).rejects.toThrow();
     expect(transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('inventario de todos os itens gerenciais conhecidos pelo JR', () => {
+  const rows = [
+    fact('NFENTRADA|115098|ITEM|2', 3024),
+    fact('NFENTRADA|115856|ITEM|2', 1813),
+    fact('NFENTRADA|115900|ITEM|2', 4816),
+  ];
+
+  it('pagina categorias diferentes sem limitar ao oleo', async () => {
+    const { service, findMany } = setup([
+      inventory(rows),
+      rows,
+      inventory(rows),
+      [rows[2]],
+    ]);
+    const first = await service.knownManagerialEntries(undefined, '2');
+    const last = await service.knownManagerialEntries(first.nextCursor!, '2');
+
+    expect(findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.not.objectContaining({ aethosItemId: 3024 }),
+      }),
+    );
+    expect(first.scope).toEqual({
+      sourceCompanyIds: ['1'],
+      aethosItemIds: null,
+    });
+    expect(first.category).toBe('ALL');
+    expect(first.rows.map((row) => row.aethosItemId)).toEqual([3024, 1813]);
+    expect(last.rows.map((row) => row.aethosItemId)).toEqual([4816]);
+    expect(last.snapshotId).toBe(first.snapshotId);
+    expect(first.totalRows).toBe(3);
+    expect(last.hasMore).toBe(false);
+  });
+
+  it('nao aceita cursor do escopo de oleo no escopo geral', async () => {
+    const { service } = setup([inventory(rows), rows, inventory(rows)]);
+    const oil = await service.knownManagerialOilEntries(undefined, '2');
+
+    await expect(
+      service.knownManagerialEntries(oil.nextCursor!, '2'),
+    ).rejects.toThrow(ConflictException);
   });
 });
