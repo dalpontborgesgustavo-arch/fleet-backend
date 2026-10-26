@@ -105,6 +105,10 @@ type SyncContract = {
   contractedAt: Date | null;
   lastContractedAt: Date | null;
   contractedByUser: string | null;
+  approvedAt: Date | null | undefined;
+  approvalCycleContractedAt: Date | null | undefined;
+  approvalCycleSourceId: string | null | undefined;
+  approvalCycleHistoryComplete: boolean | undefined;
   originalValue: Prisma.Decimal;
   statusCode: string;
   statusDescription: string;
@@ -1061,6 +1065,30 @@ export function normalizeContracts(body: unknown) {
           'Nao informado');
       const attachments = normalizeContractAttachments(row);
       const generatedAttachments = normalizeGeneratedContractAttachments(row);
+      // Propriedade ausente no agente antigo preserva o marco auditado.
+      // null explicito em uma carga nova pode limpar um marco sem evidencia.
+      const optionalSourceValue = (names: string[]) => {
+        const name = names.find((key) =>
+          Object.prototype.hasOwnProperty.call(row, key),
+        );
+        return name === undefined ? undefined : row[name];
+      };
+      const approvedAt = optionalSourceValue([
+        'dataEntradaAprovacao',
+        'approvedAt',
+      ]);
+      const cycleContractedAt = optionalSourceValue([
+        'dataContratacaoCiclo',
+        'approvalCycleContractedAt',
+      ]);
+      const cycleSourceId = optionalSourceValue([
+        'idHistoricoEntradaAprovacao',
+        'approvalCycleSourceId',
+      ]);
+      const historyComplete = optionalSourceValue([
+        'historicoCicloAprovacaoCompleto',
+        'approvalCycleHistoryComplete',
+      ]);
 
       const contract = {
         aethosId: normalizeText(
@@ -1092,6 +1120,22 @@ export function normalizeContracts(body: unknown) {
           pick(row, ['nomeContratante', 'contractorName', 'NM_PESSOA']),
         ),
         registeredAt,
+        approvedAt:
+          approvedAt === undefined
+            ? undefined
+            : normalizeSafeContractDateTime(approvedAt),
+        approvalCycleContractedAt:
+          cycleContractedAt === undefined
+            ? undefined
+            : normalizeSafeContractDateTime(cycleContractedAt),
+        approvalCycleSourceId:
+          cycleSourceId === undefined
+            ? undefined
+            : normalizeText(cycleSourceId) || null,
+        approvalCycleHistoryComplete:
+          historyComplete === undefined
+            ? undefined
+            : normalizeBoolean(historyComplete, false),
         startDate: normalizeSafeContractDate(
           pick(row, ['dataInicio', 'startDate', 'DT_INICIO']),
         ),
@@ -2100,6 +2144,11 @@ export class AethosIntegrationService {
               contractorAethosId: contract.contractorAethosId,
               contractorName: contract.contractorName,
               registeredAt: contract.registeredAt,
+              approvedAt: contract.approvedAt,
+              approvalCycleContractedAt: contract.approvalCycleContractedAt,
+              approvalCycleSourceId: contract.approvalCycleSourceId,
+              approvalCycleHistoryComplete:
+                contract.approvalCycleHistoryComplete,
               startDate: contract.startDate,
               endDate: contract.endDate,
               finalizedAt: contract.finalizedAt,
@@ -2142,6 +2191,11 @@ export class AethosIntegrationService {
               contractorAethosId: contract.contractorAethosId,
               contractorName: contract.contractorName,
               registeredAt: contract.registeredAt,
+              approvedAt: contract.approvedAt,
+              approvalCycleContractedAt: contract.approvalCycleContractedAt,
+              approvalCycleSourceId: contract.approvalCycleSourceId,
+              approvalCycleHistoryComplete:
+                contract.approvalCycleHistoryComplete,
               startDate: contract.startDate,
               endDate: contract.endDate,
               finalizedAt: contract.finalizedAt,

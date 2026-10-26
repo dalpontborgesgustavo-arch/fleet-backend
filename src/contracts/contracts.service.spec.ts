@@ -10,6 +10,7 @@ import {
   ensureContractReadAccess,
   ensureContractWriteAccess,
   workflowTemplate,
+  mapContractWorkflow,
 } from './contracts.service';
 
 function contractRecord() {
@@ -29,6 +30,10 @@ function contractRecord() {
     contractedAt: null,
     lastContractedAt: null,
     contractedByUser: null,
+    approvedAt: new Date('2026-07-21T09:00:00.000Z'),
+    approvalCycleContractedAt: null,
+    approvalCycleSourceId: 'history-1992',
+    approvalCycleHistoryComplete: true,
     originalValue: new Prisma.Decimal('2558.00'),
     statusCode: 'P',
     statusDescription: 'Aguardando aprovacao',
@@ -59,6 +64,143 @@ function contractRecord() {
 }
 
 describe('ContractsService', () => {
+  describe('official approval cycle', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-07-27T12:00:00Z'));
+    });
+    afterEach(() => jest.useRealTimers());
+
+    it('ages only the first pending stage of approval, starting after registration', () => {
+      const workflow = mapContractWorkflow(contractRecord());
+      expect(workflow.totalElapsedBusinessDays).toBe(4);
+      expect(workflow.stages[1]).toMatchObject({
+        elapsedDays: 4,
+        isCurrent: true,
+      });
+      expect(
+        workflow.stages.slice(2).every((stage) => stage.elapsedDays === null),
+      ).toBe(true);
+    });
+
+    it.each(['O', 'F'])(
+      'closes %s at the official same-cycle hiring while keeping missing dates visible',
+      (statusCode) => {
+        const workflow = mapContractWorkflow({
+          ...contractRecord(),
+          statusCode,
+          approvalCycleContractedAt: new Date('2026-07-24T15:00:00Z'),
+          lastContractedAt: new Date('2026-07-27T11:00:00Z'),
+          workflow: { type: 'SERVICO', status: 'IN_PROGRESS', stages: [] },
+        });
+        expect(workflow).toMatchObject({
+          status: 'COMPLETED',
+          operationallyActive: false,
+          totalElapsedBusinessDays: 3,
+          dataEntryComplete: false,
+          missingStageCount: 5,
+        });
+        expect(
+          workflow.stages
+            .slice(1, -1)
+            .every(
+              (stage) => stage.elapsedDays === null && stage.requiresDataEntry,
+            ),
+        ).toBe(true);
+        expect(workflow.stages.at(-1)).toMatchObject({
+          elapsedDays: null,
+          intervalComplete: false,
+        });
+      },
+    );
+
+    it.each(['A', 'C'])(
+      'excludes %s from indicators even if old dates exist',
+      (statusCode) => {
+        const workflow = mapContractWorkflow({
+          ...contractRecord(),
+          statusCode,
+        });
+        expect(workflow).toMatchObject({
+          eligibleForIndicators: false,
+          operationallyActive: false,
+          totalElapsedBusinessDays: null,
+          approvedAt: null,
+        });
+        expect(
+          workflow.stages.every((stage) => stage.elapsedDays === null),
+        ).toBe(true);
+      },
+    );
+
+    it('does not infer approval from registration, synchronization or legacy hiring', () => {
+      const workflow = mapContractWorkflow({
+        ...contractRecord(),
+        statusCode: 'F',
+        approvedAt: null,
+        approvalCycleHistoryComplete: true,
+        contractedAt: new Date('2026-07-24T15:00:00Z'),
+      });
+      expect(workflow.totalElapsedBusinessDays).toBeNull();
+      expect(workflow.stages.every((stage) => stage.elapsedDays === null)).toBe(
+        true,
+      );
+    });
+
+    it('ignores dates from a previous cycle and keeps notice time separate', () => {
+      const workflow = mapContractWorkflow({
+        ...contractRecord(),
+        startDate: new Date('2026-08-05T00:00:00Z'),
+        workflow: {
+          type: 'EMPREITEIRO',
+          stages: [
+            {
+              key: 'CONFERENCIA_ADMINISTRATIVO',
+              completedAt: new Date('2026-07-20T12:00:00Z'),
+            },
+          ],
+        },
+      });
+      expect(workflow.stages[1]).toMatchObject({
+        completedAt: null,
+        elapsedDays: 4,
+      });
+      expect(workflow.requestNotice).toMatchObject({
+        elapsedCalendarDays: 16,
+        targetCalendarDays: 15,
+      });
+      expect(workflow.totalElapsedBusinessDays).toBe(4);
+    });
+
+    it('uses adjacent complete stages for duration, never spans a missing intermediate date', () => {
+      const workflow = mapContractWorkflow({
+        ...contractRecord(),
+        statusCode: 'O',
+        approvalCycleContractedAt: new Date('2026-07-24T15:00:00Z'),
+        workflow: {
+          type: 'SERVICO',
+          stages: [
+            {
+              key: 'CONFERENCIA_ADMINISTRATIVO',
+              completedAt: new Date('2026-07-22T12:00:00Z'),
+            },
+            {
+              key: 'ASSINATURA_FORNECEDOR',
+              completedAt: new Date('2026-07-24T12:00:00Z'),
+            },
+          ],
+        },
+      });
+      expect(workflow.stages[1]).toMatchObject({
+        elapsedDays: 1,
+        intervalComplete: true,
+      });
+      expect(workflow.stages[3]).toMatchObject({
+        elapsedDays: null,
+        intervalComplete: false,
+      });
+    });
+  });
   it('restricts access to the same profiles that consult construction works', () => {
     expect(() => ensureContractReadAccess('juridico')).not.toThrow();
     expect(() => ensureContractReadAccess('engenharia')).toThrow(
@@ -141,9 +283,9 @@ describe('ContractsService', () => {
     expect(workflowTemplate('EMPREITEIRO')).toEqual([
       expect.objectContaining({
         key: 'SOLICITACAO_ENGENHEIRO',
-        targetDays: 15,
-        targetUnit: 'CALENDAR_DAYS',
-        targetComparison: 'MIN',
+        targetDays: 0,
+        targetUnit: 'BUSINESS_DAYS',
+        targetComparison: 'MAX',
       }),
       expect.objectContaining({
         key: 'CONFERENCIA_ADMINISTRATIVO',
@@ -200,6 +342,8 @@ describe('ContractsService', () => {
             contractedAt: new Date('2026-07-24T10:15:30.123Z'),
             lastContractedAt: new Date('2026-07-25T11:16:31.456Z'),
             contractedByUser: 'USUARIO.TESTE',
+            statusCode: 'O',
+            approvalCycleContractedAt: new Date('2026-07-24T10:15:30.123Z'),
           },
         ]),
         count: jest.fn().mockResolvedValue(1),
@@ -286,8 +430,8 @@ describe('ContractsService', () => {
     );
     expect(result.items[0].workflow.stages[0]).toEqual(
       expect.objectContaining({
-        label: 'Solicitacao do contrato',
-        completedAt: '2026-07-20T17:11:12.583Z',
+        label: 'Entrada em aprovacao',
+        completedAt: '2026-07-21T09:00:00.000Z',
         performanceStatus: 'ON_TIME',
       }),
     );
@@ -406,18 +550,62 @@ describe('ContractsService', () => {
     expect(stageUpsert.mock.calls[0][0]).toEqual(
       expect.objectContaining({
         create: expect.objectContaining({
-          completedAt: new Date('2026-07-20T17:11:12.583Z'),
+          completedAt: new Date('2026-07-21T09:00:00.000Z'),
         }),
         update: expect.objectContaining({
           targetDays: 0,
           targetUnit: 'BUSINESS_DAYS',
           targetComparison: 'MAX',
-          completedAt: new Date('2026-07-20T17:11:12.583Z'),
+          completedAt: new Date('2026-07-21T09:00:00.000Z'),
         }),
       }),
     );
     expect(result.workflow).toEqual(
       expect.objectContaining({ type: 'SERVICO', totalStages: 7 }),
     );
+  });
+
+  it('saves an incomplete hired workflow without reopening it or erasing hidden previous-cycle dates', async () => {
+    const oldDate = new Date('2026-07-20T12:00:00Z');
+    const contract = {
+      ...contractRecord(),
+      statusCode: 'O',
+      approvalCycleContractedAt: new Date('2026-07-24T15:00:00Z'),
+      workflow: {
+        id: 'workflow-1',
+        type: 'SERVICO',
+        status: 'IN_PROGRESS',
+        stages: [{ key: 'CONFERENCIA_ADMINISTRATIVO', completedAt: oldDate }],
+      },
+    };
+    const stageUpsert = jest.fn().mockResolvedValue({});
+    const workflowUpsert = jest.fn().mockResolvedValue({ id: 'workflow-1' });
+    const tx = {
+      contractWorkflow: { upsert: workflowUpsert },
+      contractWorkflowStage: { upsert: stageUpsert, deleteMany: jest.fn() },
+    };
+    const prisma = {
+      aethosContract: { findFirst: jest.fn().mockResolvedValue(contract) },
+      $transaction: jest.fn((callback) => callback(tx)),
+    };
+    await new ContractsService(prisma as never).updateWorkflow(
+      'contract-db-id',
+      {
+        type: 'SERVICO',
+        status: 'IN_PROGRESS',
+        notes: 'Conferir datas pendentes',
+        stages: [],
+      },
+      'admin',
+    );
+    expect(workflowUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          status: 'COMPLETED',
+          outcomeAt: contract.approvalCycleContractedAt,
+        }),
+      }),
+    );
+    expect(stageUpsert.mock.calls[1][0].update.completedAt).toEqual(oldDate);
   });
 });

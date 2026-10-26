@@ -471,6 +471,10 @@ model AethosContract {
   contractedAt              DateTime?
   lastContractedAt          DateTime?
   contractedByUser          String?
+  approvedAt                DateTime?
+  approvalCycleContractedAt  DateTime?
+  approvalCycleSourceId      String?
+  approvalCycleHistoryComplete Boolean @default(false)
   originalValue             Decimal                    @db.Decimal(18, 2)
   statusCode                String
   statusDescription         String
@@ -507,6 +511,7 @@ model AethosContract {
   @@index([contractorAethosId])
   @@index([statusCode])
   @@index([contractedAt])
+  @@index([approvedAt])
   @@index([active])
   @@index([syncedAt])
   @@index([lastSeenSyncId])

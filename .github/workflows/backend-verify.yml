@@ -100,5 +100,9 @@ jobs:
       - run: >-
           node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();db.dudaObservationSourceRow.count().then(n=>{if(n!==0)process.exitCode=1;console.log("Duda delayed-receipt source readable:",n);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
       - run: node scripts/duda-bd-geral/smoke_test.mjs
+      - name: Rehearse official contract approval cycle and dependent BI views
+        env:
+          CONTRACT_APPROVAL_REHEARSAL: '1'
+        run: node scripts/contracts/rehearse-approval-cycle.mjs
       - run: npm run build
       - run: node scripts/duda-bd-geral/smoke_manual.cjs
