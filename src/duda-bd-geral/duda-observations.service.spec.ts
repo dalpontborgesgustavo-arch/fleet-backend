@@ -19,6 +19,7 @@ describe('DudaObservationsService', () => {
       findUniqueOrThrow: jest.fn(),
     },
     dudaObservationRevision: { create: jest.fn(), findMany: jest.fn() },
+    dudaObservationSourceRow: { count: jest.fn(), findMany: jest.fn() },
     user: { findMany: jest.fn() },
     $transaction: jest.fn(),
   };
@@ -56,6 +57,27 @@ describe('DudaObservationsService', () => {
         Promise.resolve({ id: 'obs-1', version: 1, ...data }),
     );
     prisma.dudaObservationRevision.create.mockResolvedValue({ id: 'rev-1' });
+  });
+
+  it('consulta atrasos históricos isolados por versão e mês', async () => {
+    prisma.dudaObservationSourceRow.count.mockResolvedValue(1);
+    prisma.dudaObservationSourceRow.findMany.mockResolvedValue([
+      { excelRow: 8, workName: 'Obra' },
+    ]);
+    const result = await service.listSourceRows('batch-1', {
+      page: '1',
+      month: '2026-10',
+    });
+    expect(result).toMatchObject({ total: 1, rows: [{ excelRow: 8 }] });
+    expect(prisma.dudaObservationSourceRow.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { importId: 'batch-1', trackingMonth: '2026-10' },
+      }),
+    );
+    expect(prisma.dudaObservation.create).not.toHaveBeenCalled();
+    await expect(
+      service.listSourceRows('batch-1', { month: '2026-13' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('registra somente postergação vinculada à linha sem alterar a BD Geral', async () => {

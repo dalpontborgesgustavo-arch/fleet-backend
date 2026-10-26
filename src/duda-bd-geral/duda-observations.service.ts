@@ -129,6 +129,43 @@ function state(row: {
 export class DudaObservationsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async listSourceRows(
+    importId: string,
+    options: { page?: string; month?: string },
+  ) {
+    const batch = await this.prisma.dudaBdGeralImport.findUnique({
+      where: { id: importId },
+      select: { id: true },
+    });
+    if (!batch) throw new NotFoundException('Importação não encontrada');
+    const page = options.page === undefined ? 1 : Number(options.page);
+    if (
+      !Number.isSafeInteger(page) ||
+      page < 1 ||
+      page > 100000 ||
+      (options.page !== undefined && !/^\d+$/.test(options.page))
+    ) {
+      throw new BadRequestException('Página inválida');
+    }
+    if (options.month && !MONTH.test(options.month)) {
+      throw new BadRequestException('Mês inválido');
+    }
+    const where = {
+      importId,
+      ...(options.month ? { trackingMonth: options.month } : {}),
+    };
+    const [total, rows] = await Promise.all([
+      this.prisma.dudaObservationSourceRow.count({ where }),
+      this.prisma.dudaObservationSourceRow.findMany({
+        where,
+        orderBy: { excelRow: 'desc' },
+        skip: (page - 1) * 50,
+        take: 50,
+      }),
+    ]);
+    return { page, pageSize: 50, total, rows };
+  }
+
   async list(
     importId: string,
     options: { page?: string; status?: string; kind?: string; month?: string },
