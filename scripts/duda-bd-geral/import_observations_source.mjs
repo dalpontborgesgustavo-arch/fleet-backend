@@ -21,6 +21,11 @@ const rows = rowsRaw.toString('utf8').trimEnd().split('\n').map((line) => JSON.p
 assert(rows.length === manifest.delayRowCount && rows.length > 0, 'Delay count mismatch');
 assert(rows.every((row, i) => Number.isSafeInteger(row.excelRow) && row.excelRow >= 2 && row.excelRow <= manifest.lastExcelRow && (i === 0 || row.excelRow > rows[i - 1].excelRow)), 'Invalid row ordering');
 assert(rows.every((row) => /^[0-9a-f]{64}$/.test(row.rowSha256) && row.sectionLabel && row.cells && Object.keys(row.cells).length === 27 && !('H' in row.cells) && !('I' in row.cells)), 'Invalid delay row');
+for (const row of rows) {
+  const section = /M[ÊE]S\s+(1[0-2]|0?[1-9])\b(?:\s+DE\s+(20\d{2}))?/i.exec(row.sectionLabel);
+  const expectedMonth = section?.[2] ? `${section[2]}-${String(Number(section[1])).padStart(2, '0')}` : null;
+  assert(row.trackingMonth === expectedMonth, `Incorrect tracking month on source row ${row.excelRow}`);
+}
 assert(manifest.excludedAdvanceExcelRows.every((excelRow) => !rows.some((row) => row.excelRow === excelRow)), 'An advance row was included');
 assert(sha256(rows.map((row) => row.rowSha256).join('\n')) === manifest.rowHashesSha256, 'Row digest mismatch');
 if (mode === '--verify-only') {
