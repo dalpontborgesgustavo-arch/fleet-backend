@@ -65,7 +65,7 @@ const manifest = {
 };
 const observations = [8, 14].map((excelRow) => ({
   excelRow, rowSha256, trackingMonth: '2026-10',
-  sectionLabel: 'Recebimentos atrasados de outubro', groupLabel: null,
+  sectionLabel: 'OBSERVAÇÕES REFERENTE AO RECEBIMENTO DO MÊS 10 DE 2026', groupLabel: null,
   workName: `Obra fictícia ${excelRow}`, municipality: 'Município fictício', cells,
 }));
 const observationsBytes = Buffer.from(observations.map((row) => JSON.stringify(row)).join('\n') + '\n');

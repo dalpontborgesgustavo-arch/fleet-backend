@@ -22,7 +22,9 @@ LAST_COLUMN = 29
 
 
 def section_month(label):
-    match = re.search(r"M[ÊE]S\s+(0?[1-9]|1[0-2])(?:\s+DE\s+(20\d{2}))?", label, re.I)
+    # Match two-digit months before one-digit months; the word boundary avoids
+    # silently treating "10" as "1" when a year follows.
+    match = re.search(r"M[ÊE]S\s+(1[0-2]|0?[1-9])\b(?:\s+DE\s+(20\d{2}))?", label, re.I)
     return f"{match.group(2)}-{int(match.group(1)):02d}" if match and match.group(2) else None
 
 
