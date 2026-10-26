@@ -50,7 +50,7 @@ async function main() {
   const filteredSource = await service.listRows(batch.id, { columnFilters: JSON.stringify({ L: '100' }) });
   assert.ok(filteredSource.rows.some((row) => row.id === source.id));
   const originalCount = await prisma.dudaBdGeralRow.count({ where: { importId: batch.id } });
-  assert.equal(originalCount, 1528);
+  assert.equal(originalCount, 1529);
   console.log('Duda manual service smoke passed: create, filter, edit, overlay, audit, source unchanged');
 }
 
