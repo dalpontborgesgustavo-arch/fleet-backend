@@ -14,15 +14,13 @@ import warnings
 
 import openpyxl
 from openpyxl.worksheet.formula import ArrayFormula, DataTableFormula
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, range_boundaries
 
 
 HEADERS_ROW = 6
 FIRST_BODY_ROW = 7
-LAST_BODY_ROW = 1534
 LAST_COLUMN = 29  # AC: the Excel table's end, not worksheet max_column.
 EXCLUDED_COLUMNS = {8, 9}  # H: contract value; I: contract balance (user decision).
-AUDITED_MAIN_SHA256 = "61b4b3e071f3d821cf952dc3408cc28ddac97a958d977eaeec45abb512081425"
 # Read-only SERVER BI comparison on 21/10/2026: these rows have business-value
 # differences from the conflicted copy even after removing H/I. Never use the
 # main copy as a certified financial source until Duda reconciles them.
@@ -65,26 +63,33 @@ def canonical_json(value):
 
 def extract(source: pathlib.Path, output_dir: pathlib.Path):
     source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
-    conflict_rows = AUDITED_CONFLICT_ROWS if source_sha == AUDITED_MAIN_SHA256 else set()
+    # A newer workbook is still provisional until the disputed values are
+    # reconciled with Duda; a changed file hash is not proof of resolution.
+    conflict_rows = AUDITED_CONFLICT_ROWS
     output_dir.mkdir(parents=True, exist_ok=True)
     warnings.filterwarnings("ignore", message="Unknown extension is not supported")
     formulas = openpyxl.load_workbook(source, read_only=False, data_only=False)
     cached = openpyxl.load_workbook(source, read_only=False, data_only=True)
     ws = formulas["BD Geral"]
     values_ws = cached["BD Geral"]
+    table = ws.tables.get("Tabela1")
+    if table is None:
+        raise ValueError("BD Geral source table is missing")
+    first_col, first_row, last_col, last_body_row = range_boundaries(table.ref)
+    if (first_col, first_row, last_col) != (1, HEADERS_ROW, LAST_COLUMN):
+        raise ValueError("Unexpected BD Geral table range; stop before exporting")
+    if not 1534 <= last_body_row <= ws.max_row:
+        raise ValueError("Unexpected BD Geral body size; stop before exporting")
     headers = [text_value(ws.cell(HEADERS_ROW, index).value) for index in range(1, LAST_COLUMN + 1)]
     expected = ("ITEM", "DATA DE FATURAMENTO PREVISTA")
     if headers[0] != expected[0] or headers[15] != expected[1]:
         raise ValueError("Unexpected BD Geral column layout; stop before exporting")
-    if ws.max_row < LAST_BODY_ROW:
-        raise ValueError("BD Geral is shorter than the audited source range")
-
     rows_path = output_dir / "bd_geral_rows.jsonl"
     counts = {"detail_candidate": 0, "other_content_review": 0, "formula_only": 0, "blank": 0}
     error_count = 0
     row_hashes = []
     with rows_path.open("w", encoding="utf-8", newline="\n") as stream:
-        for excel_row in range(FIRST_BODY_ROW, LAST_BODY_ROW + 1):
+        for excel_row in range(FIRST_BODY_ROW, last_body_row + 1):
             cells = {}
             constants = 0
             formula_count = 0
@@ -159,11 +164,11 @@ def extract(source: pathlib.Path, output_dir: pathlib.Path):
     manifest = {
         "formatVersion": 1,
         "sheet": "BD Geral",
-        "tableRange": "A6:AC1534",
+        "tableRange": table.ref,
         "sourceWorkbookSha256": source_sha,
-        "sourceLabel": "Principal (cópia auditada; conflito ainda não reconciliado)",
+        "sourceLabel": "Planilha recebida, provisória; divergências históricas ainda não reconciliadas",
         "capturedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "physicalRowCount": LAST_BODY_ROW - FIRST_BODY_ROW + 1,
+        "physicalRowCount": last_body_row - FIRST_BODY_ROW + 1,
         "detailCandidateCount": counts["detail_candidate"],
         "includedColumnCount": LAST_COLUMN - len(EXCLUDED_COLUMNS),
         "excludedColumns": ["H", "I"],

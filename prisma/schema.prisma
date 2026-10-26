@@ -4146,6 +4146,7 @@ model DudaBdGeralImport {
   rows                 DudaBdGeralRow[]
   manualEntries        DudaBdGeralManualEntry[]
   observations         DudaObservation[]
+  observationSourceRows DudaObservationSourceRow[]
 
   @@index([status, createdAt])
 }
@@ -4270,6 +4271,27 @@ model DudaObservationRevision {
 
   @@unique([observationId, version])
   @@index([observationId, changedAt])
+}
+
+// Read-only, versioned delay records from the Observações worksheet. Legacy
+// advances are excluded; historical rows never become live open tasks without
+// individual reconciliation.
+model DudaObservationSourceRow {
+  id             String            @id @default(uuid())
+  importId       String
+  excelRow       Int
+  rowSha256      String
+  trackingMonth  String?
+  sectionLabel   String
+  groupLabel     String?
+  workName       String?
+  municipality   String?
+  cells          Json
+  createdAt      DateTime          @default(now()) @db.Timestamptz(6)
+  import         DudaBdGeralImport @relation(fields: [importId], references: [id], onDelete: Restrict)
+
+  @@unique([importId, excelRow])
+  @@index([importId, trackingMonth, excelRow])
 }
 
 // Monthly shelf records are independent of BD Geral and Observações. The

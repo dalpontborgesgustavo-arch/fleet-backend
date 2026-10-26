@@ -13,6 +13,8 @@ const dir = await mkdtemp(join(tmpdir(), 'duda-bd-geral-ci-'));
 const workbook = join(dir, 'fictitious.xlsm');
 const jsonl = join(dir, 'rows.jsonl');
 const manifestPath = join(dir, 'manifest.json');
+const observationsJsonl = join(dir, 'observations.jsonl');
+const observationsManifestPath = join(dir, 'observations_manifest.json');
 const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
   .split('')
   .concat(['AA', 'AB', 'AC'])
@@ -24,7 +26,7 @@ const cells = Object.fromEntries(
   ]),
 );
 const rowSha256 = hash(JSON.stringify(cells));
-const rows = Array.from({ length: 1528 }, (_, index) => ({
+const rows = Array.from({ length: 1529 }, (_, index) => ({
   excelRow: index + 7,
   rowSha256,
   classification: 'blank',
@@ -49,17 +51,30 @@ const rowsBytes = Buffer.from(
 const manifest = {
   formatVersion: 1,
   sheet: 'BD Geral',
-  tableRange: 'A6:AC1534',
+  tableRange: 'A6:AC1535',
   sourceWorkbookSha256: hash(workbookBytes),
   sourceLabel: 'Fictitious CI smoke test',
   capturedAt: new Date().toISOString(),
-  physicalRowCount: 1528,
+  physicalRowCount: 1529,
   detailCandidateCount: 0,
   includedColumnCount: 27,
   excludedColumns: ['H', 'I'],
-  classifications: { blank: 1528, detail_candidate: 0 },
+  classifications: { blank: 1529, detail_candidate: 0 },
   rowsSha256: hash(rowsBytes),
   rowHashesSha256: hash(rows.map((row) => row.rowSha256).join('\n')),
+};
+const observations = [8, 14].map((excelRow) => ({
+  excelRow, rowSha256, trackingMonth: '2026-10',
+  sectionLabel: 'Recebimentos atrasados de outubro', groupLabel: null,
+  workName: `Obra fictícia ${excelRow}`, municipality: 'Município fictício', cells,
+}));
+const observationsBytes = Buffer.from(observations.map((row) => JSON.stringify(row)).join('\n') + '\n');
+const observationsManifest = {
+  formatVersion: 1, sheet: 'Observações', lastExcelRow: 288,
+  sourceWorkbookSha256: hash(workbookBytes), delayRowCount: observations.length,
+  excludedAdvanceExcelRows: [4, 5], excludedColumns: ['H', 'I'],
+  rowsSha256: hash(observationsBytes),
+  rowHashesSha256: hash(observations.map((row) => row.rowSha256).join('\n')),
 };
 
 try {
@@ -67,6 +82,8 @@ try {
     writeFile(workbook, workbookBytes),
     writeFile(jsonl, rowsBytes),
     writeFile(manifestPath, JSON.stringify(manifest)),
+    writeFile(observationsJsonl, observationsBytes),
+    writeFile(observationsManifestPath, JSON.stringify(observationsManifest)),
   ]);
   for (const expected of ['staged', 'already_present']) {
     const run = spawnSync(
@@ -81,8 +98,19 @@ try {
     );
     if (run.status !== 0) throw new Error(`Importer failed: ${run.stderr}`);
     const result = JSON.parse(run.stdout.trim());
-    if (result.result !== expected || result.rows !== 1528) {
+    if (result.result !== expected || result.rows !== 1529) {
       throw new Error(`Unexpected import result: ${run.stdout}`);
+    }
+  }
+  for (const expected of ['imported_historical_delays', 'already_present']) {
+    const run = spawnSync(process.execPath, [
+      fileURLToPath(new URL('./import_observations_source.mjs', import.meta.url)),
+      observationsManifestPath, observationsJsonl, workbook,
+    ], { encoding: 'utf8', env: process.env });
+    if (run.status !== 0) throw new Error(`Observações importer failed: ${run.stderr}`);
+    const result = JSON.parse(run.stdout.trim());
+    if (result.result !== expected || result.rows !== observations.length) {
+      throw new Error(`Unexpected Observações result: ${run.stdout}`);
     }
   }
   const prisma = new PrismaClient();
@@ -93,12 +121,14 @@ try {
     if (
       !batch ||
       (await prisma.dudaBdGeralRow.count({ where: { importId: batch.id } })) !==
-        1528
+        1529 ||
+      (await prisma.dudaObservationSourceRow.count({ where: { importId: batch.id } })) !==
+        observations.length
     ) {
       throw new Error('Independent PostgreSQL readback failed');
     }
     console.log(
-      'Duda staging import smoke test passed: 1528 rows, idempotent readback',
+      'Duda staging import smoke test passed: 1529 BD rows and 2 historical delays, idempotent readback',
     );
   } finally {
     await prisma.$disconnect();
@@ -108,6 +138,8 @@ try {
     rm(workbook, { force: true }),
     rm(jsonl, { force: true }),
     rm(manifestPath, { force: true }),
+    rm(observationsJsonl, { force: true }),
+    rm(observationsManifestPath, { force: true }),
   ]);
   await rmdir(dir);
 }

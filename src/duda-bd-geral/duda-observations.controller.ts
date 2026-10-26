@@ -31,6 +31,17 @@ interface ObservationBody {
 export class DudaObservationsController {
   constructor(private readonly service: DudaObservationsService) {}
 
+  @Get('observations/source-rows')
+  sourceRows(
+    @Req() req: DudaRequest,
+    @Param('importId') importId: string,
+    @Query('page') page?: string,
+    @Query('month') month?: string,
+  ) {
+    assertDudaAdmin(req.user?.role);
+    return this.service.listSourceRows(importId, { page, month });
+  }
+
   @Get('observations')
   list(
     @Req() req: DudaRequest,

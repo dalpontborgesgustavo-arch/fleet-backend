@@ -23,7 +23,7 @@ const [manifestRaw, rowsRaw, sourceRaw] = await Promise.all([
 ]);
 const manifest = JSON.parse(manifestRaw.toString('utf8'));
 assert(manifest.formatVersion === 1, 'Unsupported export format');
-assert(manifest.sheet === 'BD Geral' && manifest.tableRange === 'A6:AC1534', 'Unexpected source range');
+assert(manifest.sheet === 'BD Geral', 'Unexpected source sheet');
 assert(manifest.includedColumnCount === 27, 'Unexpected column count');
 assert(JSON.stringify(manifest.excludedColumns) === JSON.stringify(['H', 'I']), 'Columns H and I must be excluded');
 assert(sha256(sourceRaw) === manifest.sourceWorkbookSha256, 'Workbook hash mismatch');
@@ -31,7 +31,8 @@ assert(sha256(rowsRaw) === manifest.rowsSha256, 'JSONL hash mismatch');
 
 const rows = rowsRaw.toString('utf8').trimEnd().split('\n').map((line) => JSON.parse(line));
 assert(rows.length === manifest.physicalRowCount, 'Physical row count mismatch');
-assert(rows.length === 1528, 'Unexpected BD Geral body size');
+assert(rows.length >= 1528 && rows.length <= 10000, 'Unexpected BD Geral body size');
+assert(manifest.tableRange === `A6:AC${rows.length + 6}`, 'Unexpected source range');
 assert(rows.every((row, index) => row.excelRow === index + 7), 'Physical rows are missing or out of order');
 assert(rows.every((row) => /^[0-9a-f]{64}$/.test(row.rowSha256)), 'Invalid row digest');
 assert(rows.every((row) => row.cells && Object.keys(row.cells).length === 27 && !('H' in row.cells) && !('I' in row.cells)), 'Unexpected imported columns');
@@ -111,7 +112,7 @@ try {
       prisma.dudaBdGeralRow.findFirst({ where: { importId: imported.id }, orderBy: { excelRow: 'asc' }, select: { excelRow: true, rowSha256: true } }),
       prisma.dudaBdGeralRow.findFirst({ where: { importId: imported.id }, orderBy: { excelRow: 'desc' }, select: { excelRow: true, rowSha256: true } }),
     ]);
-    assert(actual === rows.length && first?.excelRow === 7 && last?.excelRow === 1534, 'Post-import readback failed');
+    assert(actual === rows.length && first?.excelRow === 7 && last?.excelRow === rows.length + 6, 'Post-import readback failed');
     assert(first.rowSha256 === rows[0].rowSha256 && last.rowSha256 === rows.at(-1).rowSha256, 'Boundary hash readback failed');
     console.log(JSON.stringify({ result: 'staged', importId: imported.id, rows: actual, firstRow: first.excelRow, lastRow: last.excelRow }));
   }

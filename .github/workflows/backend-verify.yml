@@ -84,6 +84,7 @@ jobs:
       - run: npx prisma db execute --file prisma/migrations/20261021223000_add_duda_bd_geral_manual_entries/migration.sql --schema prisma/schema.prisma
       - run: npx prisma db execute --file prisma/migrations/20261021235000_add_duda_observations/migration.sql --schema prisma/schema.prisma
       - run: npx prisma db execute --file prisma/migrations/20261026120000_add_duda_shelf/migration.sql --schema prisma/schema.prisma
+      - run: npx prisma db execute --file prisma/migrations/20261026150000_add_duda_observation_source_rows/migration.sql --schema prisma/schema.prisma
       - run: >-
           node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();db.ssmaWorkCostSnapshot.count().then(n=>{if(n!==0)process.exitCode=1;console.log("SSMA snapshot table readable:",n);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
       - run: >-
@@ -96,6 +97,8 @@ jobs:
           node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();Promise.all([db.dudaObservation.count(),db.dudaObservationRevision.count()]).then(([observations,revisions])=>{if(observations!==0||revisions!==0)process.exitCode=1;console.log("Duda observation audit readable:",observations,revisions);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
       - run: >-
           node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();Promise.all([db.dudaShelfEntry.count(),db.dudaShelfRevision.count()]).then(([entries,revisions])=>{if(entries!==0||revisions!==0)process.exitCode=1;console.log("Duda shelf audit readable:",entries,revisions);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
+      - run: >-
+          node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();db.dudaObservationSourceRow.count().then(n=>{if(n!==0)process.exitCode=1;console.log("Duda delayed-receipt source readable:",n);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
       - run: node scripts/duda-bd-geral/smoke_test.mjs
       - run: npm run build
       - run: node scripts/duda-bd-geral/smoke_manual.cjs
