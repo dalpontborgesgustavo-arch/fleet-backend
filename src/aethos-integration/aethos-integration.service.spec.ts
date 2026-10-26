@@ -196,6 +196,10 @@ describe('AethosIntegrationService contract sync', () => {
     dataContratado: '2026-07-24T10:15:30.123',
     dataUltimaContratacao: '2026-07-25T11:16:31.456',
     usuarioContratacao: 'USUARIO.TESTE',
+    dataEntradaAprovacao: '2026-07-21T09:00:00.000',
+    dataContratacaoCiclo: null,
+    idHistoricoEntradaAprovacao: 12345,
+    historicoCicloAprovacaoCompleto: true,
     valorOriginal: 2558,
     statusCodigo: 'P',
     statusDescricao: 'Aguardando aprovacao',
@@ -285,6 +289,10 @@ describe('AethosIntegrationService contract sync', () => {
         contractedAt: new Date('2026-07-24T10:15:30.123Z'),
         lastContractedAt: new Date('2026-07-25T11:16:31.456Z'),
         contractedByUser: 'USUARIO.TESTE',
+        approvedAt: new Date('2026-07-21T09:00:00.000Z'),
+        approvalCycleContractedAt: null,
+        approvalCycleSourceId: '12345',
+        approvalCycleHistoryComplete: true,
         originalValue: expect.anything(),
         statusCode: 'P',
         contentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
@@ -380,6 +388,10 @@ describe('AethosIntegrationService contract sync', () => {
         where: { aethosId: '1992' },
         create: expect.objectContaining({
           workName: 'OBRA TESTE',
+          approvedAt: new Date('2026-07-21T09:00:00.000Z'),
+          approvalCycleContractedAt: null,
+          approvalCycleSourceId: '12345',
+          approvalCycleHistoryComplete: true,
           generatedAttachments: expect.objectContaining({
             recorteDetalhesDesde: '2026-06-01',
           }),
@@ -405,5 +417,36 @@ describe('AethosIntegrationService contract sync', () => {
         syncMode: 'full',
       }),
     ).rejects.toThrow('syncRunId e obrigatorio');
+  });
+
+  it('preserves approval fields for old agents but accepts explicit null from an audited payload', () => {
+    const legacy: Record<string, unknown> = { ...contractPayload };
+    for (const key of [
+      'dataEntradaAprovacao',
+      'dataContratacaoCiclo',
+      'idHistoricoEntradaAprovacao',
+      'historicoCicloAprovacaoCompleto',
+    ])
+      delete legacy[key];
+    const [old] = normalizeContracts({ contratos: [legacy] });
+    expect(old.approvedAt).toBeUndefined();
+    expect(old.approvalCycleContractedAt).toBeUndefined();
+    expect(old.approvalCycleHistoryComplete).toBeUndefined();
+    const [audited] = normalizeContracts({
+      contratos: [
+        {
+          ...contractPayload,
+          dataEntradaAprovacao: null,
+          dataContratacaoCiclo: null,
+          idHistoricoEntradaAprovacao: null,
+        },
+      ],
+    });
+    expect(audited).toMatchObject({
+      approvedAt: null,
+      approvalCycleContractedAt: null,
+      approvalCycleSourceId: null,
+      approvalCycleHistoryComplete: true,
+    });
   });
 });

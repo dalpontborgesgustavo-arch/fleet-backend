@@ -40,7 +40,7 @@ interface WorkflowStageTemplate {
 const SERVICE_WORKFLOW: WorkflowStageTemplate[] = [
   {
     key: 'SOLICITACAO',
-    label: 'Solicitacao do contrato',
+    label: 'Entrada em aprovacao',
     responsible: 'Solicitante (Gerente)',
     targetDays: 0,
     targetUnit: 'BUSINESS_DAYS',
@@ -106,12 +106,12 @@ const SERVICE_WORKFLOW: WorkflowStageTemplate[] = [
 const CONTRACTOR_WORKFLOW: WorkflowStageTemplate[] = [
   {
     key: 'SOLICITACAO_ENGENHEIRO',
-    label: 'Solicitacao do contrato',
+    label: 'Entrada em aprovacao',
     responsible: 'Engenheiro de Obras',
-    targetDays: 15,
-    targetUnit: 'CALENDAR_DAYS',
-    targetComparison: 'MIN',
-    targetLabel: 'Minimo de 15 dias de antecedencia',
+    targetDays: 0,
+    targetUnit: 'BUSINESS_DAYS',
+    targetComparison: 'MAX',
+    targetLabel: 'Inicio do prazo operacional',
   },
   {
     key: 'CONFERENCIA_ADMINISTRATIVO',
@@ -294,31 +294,54 @@ export function workflowTemplate(type: ContractWorkflowType) {
 
 function defaultWorkflowStatus(statusCode: string): ContractWorkflowStatus {
   if (statusCode === 'C') return 'CANCELLED';
-  if (statusCode === 'F') return 'COMPLETED';
+  if (statusCode === 'O' || statusCode === 'F') return 'COMPLETED';
   return 'IN_PROGRESS';
 }
 
-function mapContractWorkflow(contract: any) {
+export function mapContractWorkflow(contract: any) {
   const saved = contract.workflow;
   const type: ContractWorkflowType = WORKFLOW_TYPES.has(saved?.type)
     ? saved.type
     : 'SERVICO';
-  const status: ContractWorkflowStatus = WORKFLOW_STATUSES.has(saved?.status)
-    ? saved.status
-    : defaultWorkflowStatus(contract.statusCode);
+  // A situacao operacional vem do Aethos; o preenchimento e independente.
+  const status = defaultWorkflowStatus(contract.statusCode);
+  const eligibleForIndicators = ['P', 'O', 'F'].includes(contract.statusCode);
+  const operationallyActive = contract.statusCode === 'P';
+  const approvedAt: Date | null =
+    eligibleForIndicators && contract.approvalCycleHistoryComplete
+      ? (contract.approvedAt ?? null)
+      : null;
+  const cycleContractedAt: Date | null =
+    approvedAt &&
+    status === 'COMPLETED' &&
+    contract.approvalCycleContractedAt &&
+    contract.approvalCycleContractedAt >= approvedAt
+      ? contract.approvalCycleContractedAt
+      : null;
   const savedByKey = new Map(
     (saved?.stages || []).map((stage: any) => [stage.key, stage]),
   );
-  let previousCompletedAt: Date | null = null;
-
-  const stages = workflowTemplate(type).map((definition, index) => {
+  const template = workflowTemplate(type);
+  const dates: (Date | null)[] = template.map((definition, index) => {
+    if (index === 0) return approvedAt;
+    if (definition.key === 'CONTRATO_LIBERADO') return cycleContractedAt;
     const stored: any = savedByKey.get(definition.key);
-    const completedAt: Date | null =
-      index === 0
-        ? contract.registeredAt
-        : definition.key === 'CONTRATO_LIBERADO'
-          ? (contract.contractedAt ?? stored?.completedAt ?? null)
-          : (stored?.completedAt ?? null);
+    const date: Date | null = stored?.completedAt ?? null;
+    // Datas de outro ciclo permanecem salvas, mas nao viram evidencia deste.
+    return date &&
+      approvedAt &&
+      !isCalendarDateBefore(date, approvedAt) &&
+      (!cycleContractedAt || !isCalendarDateBefore(cycleContractedAt, date))
+      ? date
+      : null;
+  });
+  const firstPendingIndex = dates.findIndex((date) => !date);
+  const stages = template.map((definition, index) => {
+    const stored: any = savedByKey.get(definition.key);
+    const completedAt = dates[index];
+    const previousCompletedAt = index > 0 ? dates[index - 1] : null;
+    const isCurrent =
+      operationallyActive && Boolean(approvedAt) && index === firstPendingIndex;
     // As metas pertencem ao fluxo oficial, e nao ao preenchimento individual.
     // Isso evita que configuracoes antigas persistidas prevalecam sobre o
     // procedimento vigente.
@@ -329,43 +352,37 @@ function mapContractWorkflow(contract: any) {
     let performanceStatus: 'PENDING' | 'ON_TIME' | 'LATE' | 'COMPLETED' =
       completedAt ? 'COMPLETED' : 'PENDING';
 
-    if (index === 0 && targetComparison === 'MIN') {
-      if (completedAt && contract.startDate) {
-        elapsedDays = calendarDaysBetween(completedAt, contract.startDate);
-        performanceStatus =
-          elapsedDays >= Number(targetDays || 0) ? 'ON_TIME' : 'LATE';
-      }
-    } else if (index === 0 && completedAt) {
+    if (index === 0 && completedAt) {
       elapsedDays = 0;
       performanceStatus = 'ON_TIME';
-    } else if (previousCompletedAt) {
+    } else if (previousCompletedAt && (completedAt || isCurrent)) {
       const end = completedAt || new Date();
-      elapsedDays =
-        targetUnit === 'CALENDAR_DAYS'
-          ? calendarDaysBetween(previousCompletedAt, end)
-          : businessDaysBetween(previousCompletedAt, end);
-      if (targetDays !== null && targetDays !== undefined) {
-        const reached =
-          targetComparison === 'MIN'
-            ? elapsedDays >= targetDays
-            : elapsedDays <= targetDays;
-        performanceStatus = completedAt
-          ? reached
-            ? 'ON_TIME'
-            : 'LATE'
-          : targetComparison === 'MAX' && elapsedDays > targetDays
-            ? 'LATE'
-            : 'PENDING';
+      if (!isCalendarDateBefore(end, previousCompletedAt)) {
+        elapsedDays =
+          targetUnit === 'CALENDAR_DAYS'
+            ? calendarDaysBetween(previousCompletedAt, end)
+            : businessDaysBetween(previousCompletedAt, end);
+        if (targetDays !== null && targetDays !== undefined) {
+          const reached =
+            targetComparison === 'MIN'
+              ? elapsedDays >= targetDays
+              : elapsedDays <= targetDays;
+          performanceStatus = completedAt
+            ? reached
+              ? 'ON_TIME'
+              : 'LATE'
+            : targetComparison === 'MAX' && elapsedDays > targetDays
+              ? 'LATE'
+              : 'PENDING';
+        }
       }
     }
-
-    if (completedAt) previousCompletedAt = completedAt;
 
     return {
       id: stored?.id ?? null,
       key: definition.key,
       sequence: index + 1,
-      label: stored?.label ?? definition.label,
+      label: definition.label,
       responsible: stored?.responsible ?? definition.responsible,
       targetDays,
       targetUnit,
@@ -375,29 +392,49 @@ function mapContractWorkflow(contract: any) {
       notes: stored?.notes ?? null,
       elapsedDays,
       performanceStatus,
+      isCurrent,
+      intervalComplete:
+        index > 0 &&
+        Boolean(completedAt && previousCompletedAt) &&
+        elapsedDays !== null,
+      requiresDataEntry: status === 'COMPLETED' && !completedAt,
       updatedByName: stored?.updatedByName ?? null,
       updatedAt: iso(stored?.updatedAt),
     };
   });
 
   const completedStages = stages.filter((stage) => stage.completedAt).length;
-  const firstDate = stages.find((stage) => stage.completedAt)?.completedAt;
-  const lastDate = [...stages]
-    .reverse()
-    .find((stage) => stage.completedAt)?.completedAt;
-  const outcomeAt =
-    saved?.outcomeAt ??
-    (status !== 'IN_PROGRESS'
-      ? contract.finalizedAt || contract.endDate || null
-      : null);
-  const totalEnd = outcomeAt || (lastDate ? new Date(lastDate) : null);
+  const totalEnd = operationallyActive ? new Date() : cycleContractedAt;
+  const noticeDays =
+    type === 'EMPREITEIRO' && contract.registeredAt && contract.startDate
+      ? calendarDaysBetween(contract.registeredAt, contract.startDate)
+      : null;
 
   return {
     id: saved?.id ?? null,
     persisted: Boolean(saved),
     type,
     status,
-    outcomeAt: iso(outcomeAt),
+    outcomeAt: iso(cycleContractedAt),
+    approvedAt: iso(approvedAt),
+    approvalCycleContractedAt: iso(cycleContractedAt),
+    approvalCycleSourceId: contract.approvalCycleSourceId ?? null,
+    approvalCycleHistoryComplete:
+      contract.approvalCycleHistoryComplete === true,
+    operationallyActive,
+    eligibleForIndicators,
+    dataEntryComplete:
+      completedStages === stages.length &&
+      stages.every((stage, index) => index === 0 || stage.intervalComplete),
+    missingStageCount: stages.length - completedStages,
+    requestNotice: {
+      registeredAt: iso(contract.registeredAt),
+      startDate: iso(contract.startDate),
+      elapsedCalendarDays: noticeDays,
+      targetCalendarDays: type === 'EMPREITEIRO' ? 15 : null,
+      performanceStatus:
+        noticeDays === null ? 'PENDING' : noticeDays >= 15 ? 'ON_TIME' : 'LATE',
+    },
     cancellationReason:
       saved?.cancellationReason ?? contract.cancellationReason ?? null,
     notes: saved?.notes ?? null,
@@ -405,8 +442,8 @@ function mapContractWorkflow(contract: any) {
     totalStages: stages.length,
     progressPercent: Math.round((completedStages / stages.length) * 100),
     totalElapsedBusinessDays:
-      firstDate && totalEnd
-        ? businessDaysBetween(new Date(firstDate), totalEnd)
+      approvedAt && totalEnd && !isCalendarDateBefore(totalEnd, approvedAt)
+        ? businessDaysBetween(approvedAt, totalEnd)
         : null,
     updatedByName: saved?.updatedByName ?? null,
     updatedAt: iso(saved?.updatedAt),
@@ -471,6 +508,11 @@ function mapContract(contract: any, includeAttachments = false) {
     contractedAt: iso(contract.contractedAt),
     lastContractedAt: iso(contract.lastContractedAt),
     contractedByUser: contract.contractedByUser,
+    approvedAt: iso(contract.approvedAt),
+    approvalCycleContractedAt: iso(contract.approvalCycleContractedAt),
+    approvalCycleSourceId: contract.approvalCycleSourceId ?? null,
+    approvalCycleHistoryComplete:
+      contract.approvalCycleHistoryComplete === true,
     originalValue: decimalNumber(contract.originalValue),
     statusCode: contract.statusCode,
     statusDescription: contract.statusDescription,
@@ -794,10 +836,8 @@ export class ContractsService {
     }
 
     const requestedStatus = text(body.status).toUpperCase();
-    const status = (requestedStatus ||
-      contract.workflow?.status ||
-      'IN_PROGRESS') as ContractWorkflowStatus;
-    if (!WORKFLOW_STATUSES.has(status)) {
+    const status = defaultWorkflowStatus(contract.statusCode);
+    if (requestedStatus && !WORKFLOW_STATUSES.has(requestedStatus)) {
       throw new BadRequestException('Status do fluxo invalido');
     }
 
@@ -825,16 +865,20 @@ export class ContractsService {
       }
     }
 
+    const approvedAt = contract.approvalCycleHistoryComplete
+      ? contract.approvedAt
+      : null;
+    const cycleContractedAt =
+      approvedAt &&
+      status === 'COMPLETED' &&
+      contract.approvalCycleContractedAt &&
+      contract.approvalCycleContractedAt >= approvedAt
+        ? contract.approvalCycleContractedAt
+        : null;
     const completedDates = template.map((definition, index) => {
-      if (index === 0) return contract.registeredAt;
+      if (index === 0) return approvedAt;
       if (definition.key === 'CONTRATO_LIBERADO') {
-        return (
-          contract.contractedAt ??
-          optionalDate(
-            stageInputs.get(definition.key)?.completedAt,
-            `Data da etapa ${definition.label}`,
-          )
-        );
+        return cycleContractedAt;
       }
       return optionalDate(
         stageInputs.get(definition.key)?.completedAt,
@@ -845,11 +889,31 @@ export class ContractsService {
     for (const [index, date] of completedDates.entries()) {
       const isAutomaticFinalStage =
         template[index]?.key === 'CONTRATO_LIBERADO' &&
-        Boolean(contract.contractedAt);
+        Boolean(cycleContractedAt);
+      if (date && index > 0 && !approvedAt) {
+        throw new BadRequestException(
+          'A entrada oficial em aprovacao ainda nao foi sincronizada',
+        );
+      }
+      if (date && approvedAt && isCalendarDateBefore(date, approvedAt)) {
+        throw new BadRequestException(
+          'A data da etapa nao pode ser anterior a entrada em aprovacao',
+        );
+      }
+      if (
+        date &&
+        cycleContractedAt &&
+        isCalendarDateBefore(cycleContractedAt, date)
+      ) {
+        throw new BadRequestException(
+          'A data da etapa nao pode ser posterior a contratacao',
+        );
+      }
       if (
         date &&
         index > 0 &&
         !completedDates[index - 1] &&
+        status !== 'COMPLETED' &&
         !isAutomaticFinalStage
       ) {
         throw new BadRequestException(
@@ -864,20 +928,32 @@ export class ContractsService {
       if (date) previous = date;
     }
 
-    const outcomeAt = optionalDate(body.outcomeAt, 'Data de conclusao');
-    if (status === 'COMPLETED' && !completedDates.at(-1)) {
-      throw new BadRequestException(
-        'Preencha a data da etapa Contrato liberado para concluir o fluxo',
-      );
-    }
-    if (status === 'CANCELLED' && !outcomeAt) {
-      throw new BadRequestException('Informe a data do cancelamento');
-    }
+    const outcomeAt = cycleContractedAt;
     if (outcomeAt && previous && isCalendarDateBefore(outcomeAt, previous)) {
       throw new BadRequestException(
         'A data de conclusao ou cancelamento nao pode ser anterior as etapas',
       );
     }
+
+    // O read model oculta datas de outro ciclo. Salvar notas com esses campos
+    // vazios nao deve apagar a evidencia antiga que ainda permanece no banco.
+    const persistedDates = completedDates.map((date, index) => {
+      if (date || contract.workflow?.type !== type) return date;
+      const stored = contract.workflow?.stages.find(
+        (stage) => stage.key === template[index].key,
+      )?.completedAt;
+      if (!stored) return date;
+      if (
+        index === 0 ||
+        template[index].key === 'CONTRATO_LIBERADO' ||
+        !approvedAt ||
+        isCalendarDateBefore(stored, approvedAt) ||
+        (cycleContractedAt && isCalendarDateBefore(cycleContractedAt, stored))
+      ) {
+        return stored;
+      }
+      return date;
+    });
 
     const actorId = optionalText(actor?.id, 120);
     const actorName = optionalText(actor?.name, 200);
@@ -942,7 +1018,7 @@ export class ContractsService {
             targetDays: definition.targetDays,
             targetUnit: definition.targetUnit,
             targetComparison: definition.targetComparison,
-            completedAt: completedDates[index],
+            completedAt: persistedDates[index],
             notes: optionalText(input?.notes, 1000),
             updatedById: actorId,
             updatedByName: actorName,
@@ -954,7 +1030,7 @@ export class ContractsService {
             targetDays: definition.targetDays,
             targetUnit: definition.targetUnit,
             targetComparison: definition.targetComparison,
-            completedAt: completedDates[index],
+            completedAt: persistedDates[index],
             notes: optionalText(input?.notes, 1000),
             updatedById: actorId,
             updatedByName: actorName,
