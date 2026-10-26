@@ -4271,3 +4271,47 @@ model DudaObservationRevision {
   @@unique([observationId, version])
   @@index([observationId, changedAt])
 }
+
+// Monthly shelf records are independent of BD Geral and Observações. The
+// workbook origin is retained in the first revision; edits have their own audit.
+model DudaShelfEntry {
+  id              String              @id @default(uuid())
+  sourceSha256    String?
+  sourceExcelRow  Int?
+  previousEntryId String?             @unique
+  trackingMonth   String
+  municipality    String
+  workName        String
+  amount          Decimal             @db.Decimal(18, 2)
+  category        String
+  note            String              @default("")
+  status          String              @default("OPEN")
+  invoicedOn      DateTime?           @db.Date
+  version         Int                 @default(1)
+  createdByUserId String?
+  updatedByUserId String?
+  createdAt       DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime            @updatedAt @db.Timestamptz(6)
+  previousEntry   DudaShelfEntry?     @relation("DudaShelfCarry", fields: [previousEntryId], references: [id], onDelete: Restrict)
+  nextEntry       DudaShelfEntry?     @relation("DudaShelfCarry")
+  revisions       DudaShelfRevision[]
+
+  @@unique([sourceSha256, sourceExcelRow])
+  @@index([trackingMonth, status])
+  @@index([trackingMonth, workName])
+}
+
+model DudaShelfRevision {
+  id              String         @id @default(uuid())
+  entryId         String
+  version         Int
+  action          String
+  before          Json?
+  after           Json
+  changedByUserId String
+  changedAt       DateTime       @default(now()) @db.Timestamptz(6)
+  entry           DudaShelfEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
+
+  @@unique([entryId, version])
+  @@index([entryId, changedAt])
+}
