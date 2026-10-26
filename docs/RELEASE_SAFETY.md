@@ -45,14 +45,21 @@ o servidor nem reiniciar o serviço antes dos gates abaixo.
 
 1. Reconciliar a fonte do backend em Git e revisar cada diferença em relação
    ao runtime. O commit publicado deve ser imutável e identificado por SHA.
-2. Em um **checkout separado** do diretório do serviço, executar `npm ci`,
-   `npx prisma generate`, build e testes. A CI deve estar verde.
+2. A CI Linux executa `npm ci`, `prisma generate`, build e testes para o SHA
+   exato de `main`. Aguardar sucesso do workflow inteiro, inclusive o ensaio
+   de migrações. Em um **checkout limpo separado** do serviço, instalar as
+   dependências pelo lock e depois copiar do payload CI somente `dist` e
+   `node_modules/.prisma/client`, para essas raízes ignoradas do checkout.
+   Manter schema, package e lock vindos do Git; o gate confere que coincidem
+   com o artefato. Não regenerar Prisma nem recompilar depois dessa cópia.
 3. Executar `node scripts/verify-backend-release.mjs <dist-em-produção>
    [--allow=src/caminho-exato.js]`. Cada exceção é um arquivo de saída JS
    revisado que faz parte da mudança intencional. A ferramenta recusa exceções
    obsoletas, alterações não autorizadas, Git sujo, SHA diferente de
-   `origin/main`, migrações divergentes e build falho. A comparação é apenas
-   leitura sobre o diretório de produção.
+   `origin/main`, migrações divergentes e build falho. Esse comando sem opções
+   de artefato conserva a recompilação local. O caminho recomendado para EC2
+   é o modo de artefato CI descrito abaixo, que verifica a compilação já
+   aprovada na CI. A comparação é apenas leitura sobre produção.
 4. Se houver migração nova, revisá-la e executá-la em procedimento separado,
    com backup e plano de reversão; não usar `db push` nem alterar migrações já
    aplicadas. Rodar o gate do banco novamente após a migração.
@@ -62,6 +69,52 @@ o servidor nem reiniciar o serviço antes dos gates abaixo.
 6. Para a web, mesclar a PR após CI e publicar **via integração Git** da
    Vercel. Conferir que o domínio de produção está `READY`, `source: git` e
    aponta para o mesmo SHA de `origin/main`. Uma prévia não é produção.
+
+## Preflight com o artefato Linux da CI
+
+Na EC2 de 1 GB, a compilação TypeScript pode passar longos períodos usando
+swap. Gerar novamente um build não é necessário quando o payload exato da CI
+é autenticado e conferido. O modo abaixo mantém os gates de Git, banco e
+diferenças do runtime; não é uma opção genérica para pular o build.
+
+```sh
+node scripts/verify-backend-release.mjs /home/ubuntu/fleet-backend/dist \
+  --ci-artifact=/caminho/fora-do-checkout/artifact.zip \
+  --artifact-id=ID_DO_ARTEFATO \
+  --allow=src/contracts/contracts.service.js \
+  --allow=src/aethos-integration/aethos-integration.service.js
+```
+
+Os dois `--allow` acima são específicos da correção de contratos; cada release
+deve fornecer somente suas diferenças revisadas. Exceções obsoletas continuam
+sendo recusadas. O candidato é o checkout que contém o script: suas raízes
+`dist` e `node_modules/.prisma/client`, além de `prisma/schema.prisma`,
+`package.json` e `package-lock.json`, devem reproduzir exatamente o artefato.
+Dependências adicionais fora dessas raízes não fazem parte dessa comparação.
+
+O gate consulta a API HTTPS pública do GitHub, sem credenciais, usando o
+repositório de `origin` e o ID informado. Exige artefato não expirado com nome
+`backend-release-SHA`, ligado ao mesmo SHA de `HEAD` e `origin/main`; o run
+deve pertencer ao repositório, ser `push` de `main`, usar
+`.github/workflows/backend-verify.yml` e estar concluído com sucesso.
+O SHA-256 do ZIP precisa coincidir com o digest oficial retornado pelo GitHub.
+
+Em uma cópia temporária, o gate confere também o checksum interno do tgz,
+rejeita caminhos inseguros, links e entradas inesperadas e compara o inventário
+e os hashes de todos os arquivos do payload com o candidato. Os três arquivos
+de fonte/configuração também estão protegidos pelo Git limpo do checkout.
+O manifesto de migrações é conferido contra o banco e a comparação JS com a
+produção conserva a allowlist exata. Erro de API, origem, checksum ou conteúdo
+bloqueia a publicação; não há fallback automático para aceitar o artefato.
+Ao preparar a pasta isolada que será ativada, conferir novamente o mesmo
+inventário controlado entre ela e o checkout aprovado. Não ativar conteúdo
+que tenha sido alterado depois dessa conferência.
+
+Requisitos desse modo: Node e Python 3 disponíveis, acesso HTTPS à API pública
+do GitHub, checkout em `main` e payload do mesmo commit. O ZIP pode ficar fora
+do checkout ou em um caminho já ignorado; não adicionar arquivos soltos que
+façam o gate de Git limpo falhar. Após aprovação, ativar exatamente esse
+payload e executar o readback do item 5, preservando a versão anterior.
 
 O estado-alvo é **correspondência de revisões e contratos** por componente:
 Git do backend ↔ artefato do servidor ↔ migrações aplicadas; Git da web ↔
