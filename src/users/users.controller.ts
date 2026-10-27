@@ -187,6 +187,8 @@ export class UsersController {
         filial: normalizeFilial(data.filial),
         canAccessTopographyInventory:
           role === 'topografia' && data.canAccessTopographyInventory === true,
+        canManageProductionControl:
+          actorRole === 'admin' && data.canManageProductionControl === true,
         ...fleetAccess,
       },
     });
@@ -252,6 +254,10 @@ export class UsersController {
             ? existing.canAccessTopographyInventory
             : data.canAccessTopographyInventory === true
           : false,
+      canManageProductionControl:
+        actorRole === 'admin' && data.canManageProductionControl !== undefined
+          ? data.canManageProductionControl === true
+          : existing.canManageProductionControl,
       ...fleetAccess,
     };
 

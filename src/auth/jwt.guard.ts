@@ -56,6 +56,7 @@ export class JwtGuard implements CanActivate {
               canAccessFleetAlerts: true,
               canAccessFleetVideo: true,
               canAccessBucketActivations: true,
+              canManageProductionControl: true,
               active: true,
               mustChangePassword: true,
             },
@@ -88,6 +89,7 @@ export class JwtGuard implements CanActivate {
       canAccessFleetAlerts: user.canAccessFleetAlerts === true,
       canAccessFleetVideo: user.canAccessFleetVideo === true,
       canAccessBucketActivations: user.canAccessBucketActivations === true,
+      canManageProductionControl: user.canManageProductionControl === true,
       mustChangePassword: user.mustChangePassword === true,
       canAccessMonthlyChecklist: payload.canAccessMonthlyChecklist === true,
     };

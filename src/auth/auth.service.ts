@@ -85,6 +85,7 @@ export class AuthService {
       canAccessFleetAlerts: user.canAccessFleetAlerts,
       canAccessFleetVideo: user.canAccessFleetVideo,
       canAccessBucketActivations: user.canAccessBucketActivations,
+      canManageProductionControl: user.canManageProductionControl,
       mustChangePassword: user.mustChangePassword,
     });
   }
@@ -141,12 +142,11 @@ export class AuthService {
         canExecuteMaintenance: storedToken.user.canExecuteMaintenance,
         canAccessFleetTracking: storedToken.user.canAccessFleetTracking,
         canAccessFleetOverview: storedToken.user.canAccessFleetOverview,
-        canAccessFleetUtilization:
-          storedToken.user.canAccessFleetUtilization,
+        canAccessFleetUtilization: storedToken.user.canAccessFleetUtilization,
         canAccessFleetAlerts: storedToken.user.canAccessFleetAlerts,
         canAccessFleetVideo: storedToken.user.canAccessFleetVideo,
-        canAccessBucketActivations:
-          storedToken.user.canAccessBucketActivations,
+        canAccessBucketActivations: storedToken.user.canAccessBucketActivations,
+        canManageProductionControl: storedToken.user.canManageProductionControl,
         mustChangePassword: storedToken.user.mustChangePassword,
       },
       normalizedToken,
@@ -189,6 +189,7 @@ export class AuthService {
       canAccessFleetAlerts?: boolean | null;
       canAccessFleetVideo?: boolean | null;
       canAccessBucketActivations?: boolean | null;
+      canManageProductionControl?: boolean | null;
       mustChangePassword?: boolean | null;
     },
     existingRefreshToken?: string,
@@ -215,6 +216,7 @@ export class AuthService {
       canAccessFleetAlerts: user.canAccessFleetAlerts,
       canAccessFleetVideo: user.canAccessFleetVideo,
       canAccessBucketActivations: user.canAccessBucketActivations,
+      canManageProductionControl: user.canManageProductionControl,
       mustChangePassword: user.mustChangePassword,
       canAccessMonthlyChecklist: monthlyChecklistAccess,
     });
@@ -307,6 +309,7 @@ export class AuthService {
     canAccessFleetAlerts?: boolean | null;
     canAccessFleetVideo?: boolean | null;
     canAccessBucketActivations?: boolean | null;
+    canManageProductionControl?: boolean | null;
     mustChangePassword?: boolean | null;
     canAccessMonthlyChecklist?: boolean | null;
   }) {
@@ -324,6 +327,7 @@ export class AuthService {
       canAccessFleetAlerts: user.canAccessFleetAlerts === true,
       canAccessFleetVideo: user.canAccessFleetVideo === true,
       canAccessBucketActivations: user.canAccessBucketActivations === true,
+      canManageProductionControl: user.canManageProductionControl === true,
       mustChangePassword: user.mustChangePassword === true,
       canAccessMonthlyChecklist: user.canAccessMonthlyChecklist === true,
     };
@@ -344,6 +348,7 @@ export class AuthService {
     canAccessFleetAlerts?: boolean | null;
     canAccessFleetVideo?: boolean | null;
     canAccessBucketActivations?: boolean | null;
+    canManageProductionControl?: boolean | null;
     mustChangePassword?: boolean | null;
     canAccessMonthlyChecklist?: boolean | null;
   }) {
@@ -362,6 +367,7 @@ export class AuthService {
       canAccessFleetAlerts: user.canAccessFleetAlerts === true,
       canAccessFleetVideo: user.canAccessFleetVideo === true,
       canAccessBucketActivations: user.canAccessBucketActivations === true,
+      canManageProductionControl: user.canManageProductionControl === true,
       mustChangePassword: user.mustChangePassword === true,
       canAccessMonthlyChecklist: user.canAccessMonthlyChecklist === true,
     };

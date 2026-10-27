@@ -41,6 +41,7 @@ model User {
   canAccessFleetAlerts            Boolean                       @default(false)
   canAccessFleetVideo             Boolean                       @default(false)
   canAccessBucketActivations      Boolean                       @default(false)
+  canManageProductionControl      Boolean                       @default(false)
   createdAt                       DateTime                      @default(now())
   occurrences                     Occurrence[]
   checklists                      Checklist[]
@@ -4341,4 +4342,68 @@ model DudaShelfRevision {
 
   @@unique([entryId, version])
   @@index([entryId, changedAt])
+}
+
+// Manual production planning is separate from fiscal invoicing and Aethos facts.
+model ProductionControlLine {
+  id              String                   @id @default(uuid())
+  competence      String                   @db.VarChar(7)
+  engineer        String
+  municipality    String?
+  workCode        String?
+  workName        String
+  activity        String
+  unit            String
+  unitPrice       Decimal?                 @db.Decimal(24, 15)
+  sourceSheet     String?
+  sourceExcelRow  Int?
+  createdByUserId String?
+  updatedByUserId String?
+  createdAt       DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime                 @updatedAt @db.Timestamptz(6)
+  daily           ProductionControlDaily[]
+  weeks           ProductionControlWeek[]
+  revisions       ProductionControlRevision[]
+
+  @@unique([competence, sourceSheet, sourceExcelRow])
+  @@index([competence, engineer, activity])
+}
+
+model ProductionControlDaily {
+  id              String                @id @default(uuid())
+  lineId          String
+  productionDate  DateTime              @db.Date
+  quantity        Decimal               @db.Decimal(16, 3)
+  updatedByUserId String?
+  updatedAt       DateTime              @updatedAt @db.Timestamptz(6)
+  line            ProductionControlLine @relation(fields: [lineId], references: [id], onDelete: Restrict)
+
+  @@unique([lineId, productionDate])
+  @@index([productionDate])
+}
+
+model ProductionControlWeek {
+  id                 String                @id @default(uuid())
+  lineId             String
+  weekIndex          Int
+  weeklyPlanQuantity Decimal?              @db.Decimal(16, 3)
+  monthPlanQuantity  Decimal?              @db.Decimal(16, 3)
+  updatedByUserId    String?
+  updatedAt          DateTime              @updatedAt @db.Timestamptz(6)
+  line               ProductionControlLine @relation(fields: [lineId], references: [id], onDelete: Restrict)
+
+  @@unique([lineId, weekIndex])
+}
+
+model ProductionControlRevision {
+  id              String                @id @default(uuid())
+  lineId          String
+  action          String
+  before          Json?
+  after           Json
+  changedByUserId String
+  changedAt       DateTime              @default(now()) @db.Timestamptz(6)
+  line            ProductionControlLine @relation(fields: [lineId], references: [id], onDelete: Restrict)
+
+  @@index([lineId, changedAt])
 }

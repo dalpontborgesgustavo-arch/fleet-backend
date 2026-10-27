@@ -14,6 +14,7 @@ import { CommercialIndicatorsModule } from './commercial-indicators/commercial-i
 import { ConstructionControlModule } from './construction-control/construction-control.module';
 import { CostPurchasesModule } from './cost-purchases/cost-purchases.module';
 import { DudaBdGeralModule } from './duda-bd-geral/duda-bd-geral.module';
+import { ProductionControlModule } from './production-control/production-control.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { EnvironmentalModule } from './environmental/environmental.module';
 import { HealthController } from './health/health.controller';
@@ -55,6 +56,7 @@ import { VehiclesModule } from './vehicles/vehicles.module';
     ConstructionControlModule,
     CostPurchasesModule,
     DudaBdGeralModule,
+    ProductionControlModule,
     ContractsModule,
     AuthModule,
     AwsBillingModule,
