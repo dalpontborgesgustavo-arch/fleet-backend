@@ -43,6 +43,7 @@ function getManageableRoles(role?: string | null): string[] {
       'corretor',
       'orcamento',
       'administrativo',
+      'administrativo_producao',
       'financeiro',
       'contabilidade',
       'ti',

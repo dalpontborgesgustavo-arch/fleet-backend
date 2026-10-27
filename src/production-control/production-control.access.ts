@@ -9,7 +9,7 @@ export interface ProductionActor {
 export function assertProductionAccess(actor?: ProductionActor): string {
   if (
     !actor?.sub ||
-    (actor.role !== 'admin' && actor.canManageProductionControl !== true)
+    (actor.role !== 'admin' && actor.role !== 'administrativo_producao')
   ) {
     throw new ForbiddenException('Acesso restrito ao Controle de Produção.');
   }

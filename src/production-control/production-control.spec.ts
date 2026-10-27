@@ -12,17 +12,23 @@ import { ProductionControlService } from './production-control.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 describe('production control guard and calendar', () => {
-  it('limits access to administrators and individually enabled users', () => {
+  it('limits access to administrators and the restricted production role', () => {
     expect(assertProductionAccess({ sub: 'admin', role: 'admin' })).toBe(
       'admin',
     );
     expect(
       assertProductionAccess({
         sub: 'lucas',
+        role: 'administrativo_producao',
+      }),
+    ).toBe('lucas');
+    expect(() =>
+      assertProductionAccess({
+        sub: 'other',
         role: 'engenharia',
         canManageProductionControl: true,
       }),
-    ).toBe('lucas');
+    ).toThrow(ForbiddenException);
     expect(() =>
       assertProductionAccess({ sub: 'other', role: 'engenharia' }),
     ).toThrow(ForbiddenException);
