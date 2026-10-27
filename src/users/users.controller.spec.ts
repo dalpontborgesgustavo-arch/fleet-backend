@@ -83,6 +83,25 @@ describe('UsersController supervisor support profile', () => {
     });
   });
 
+  it('lets an admin create the restricted production profile', async () => {
+    await controller.create(
+      { user: { role: 'admin' } },
+      {
+        email: 'lucasrf@jrmc.com.br',
+        name: 'Lucas Rodrigues Figueira',
+        password: 'temporaria123',
+        role: 'administrativo_producao',
+      },
+    );
+
+    expect(prismaUser.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        email: 'lucasrf@jrmc.com.br',
+        role: 'administrativo_producao',
+      }),
+    });
+  });
+
   it('assigns a user to Filial Norte when requested', async () => {
     await controller.create(
       { user: { role: 'admin' } },

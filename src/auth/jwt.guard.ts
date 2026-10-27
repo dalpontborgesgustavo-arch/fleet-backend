@@ -101,6 +101,15 @@ export class JwtGuard implements CanActivate {
       throw new ForbiddenException('Redefina sua senha para continuar.');
     }
 
+    if (
+      req.user.role === 'administrativo_producao' &&
+      !isPasswordChangeRoute &&
+      path !== '/production-control' &&
+      !path.startsWith('/production-control/')
+    ) {
+      throw new ForbiddenException('Acesso restrito ao Controle de Produção.');
+    }
+
     return true;
   }
 }
