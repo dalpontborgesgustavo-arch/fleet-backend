@@ -26,6 +26,18 @@ interface ProductionRequest {
 export class ProductionControlController {
   constructor(private readonly service: ProductionControlService) {}
 
+  @Get('catalog')
+  catalog(@Req() req: ProductionRequest) {
+    assertProductionAccess(req.user);
+    return this.service.catalog();
+  }
+
+  @Get('works/:code')
+  work(@Req() req: ProductionRequest, @Param('code') code: string) {
+    assertProductionAccess(req.user);
+    return this.service.findWork(code);
+  }
+
   @Get()
   list(@Req() req: ProductionRequest, @Query('competence') competence: string) {
     assertProductionAccess(req.user);
