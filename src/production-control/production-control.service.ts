@@ -103,7 +103,7 @@ export class ProductionControlService {
       }),
       this.prisma.productionControlLine.findMany({
         where: { workCode: code },
-        select: { engineer: true, municipality: true },
+        select: { workName: true, engineer: true, municipality: true },
       }),
     ]);
     const data = (state?.data || {}) as Record<string, unknown>;
@@ -126,7 +126,13 @@ export class ProductionControlService {
         contracts.map((item) => item.engineerName?.trim()).filter(Boolean),
       ),
     ] as string[];
-    const historicalNames = [...new Set(prior.map((item) => item.engineer))];
+    const confirmedPrior = prior.filter((item) => {
+      const alias = normalizedName(item.workName);
+      return alias.length >= 8 && normalizedName(obra.name).includes(alias);
+    });
+    const historicalNames = [
+      ...new Set(confirmedPrior.map((item) => item.engineer)),
+    ];
     const historicalEngineer =
       historicalNames.length === 1 ? historicalNames[0] : null;
     const engineer =
@@ -149,7 +155,7 @@ export class ProductionControlService {
           ? sourceText((item as Record<string, unknown>).cidade)
           : '',
       ),
-      ...prior.map((item) => item.municipality || ''),
+      ...confirmedPrior.map((item) => item.municipality || ''),
     ].filter(Boolean);
     const workName = normalizedName(obra.name);
     const matchingCities = [
