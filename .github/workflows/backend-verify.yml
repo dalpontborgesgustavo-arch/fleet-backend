@@ -86,6 +86,9 @@ jobs:
       - run: npx prisma db execute --file prisma/migrations/20261021235000_add_duda_observations/migration.sql --schema prisma/schema.prisma
       - run: npx prisma db execute --file prisma/migrations/20261026120000_add_duda_shelf/migration.sql --schema prisma/schema.prisma
       - run: npx prisma db execute --file prisma/migrations/20261026150000_add_duda_observation_source_rows/migration.sql --schema prisma/schema.prisma
+      - run: npx prisma db execute --file prisma/migrations/20261027150000_add_production_control/migration.sql --schema prisma/schema.prisma
+      - run: >-
+          node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();Promise.all([db.productionControlLine.count(),db.productionControlDaily.count(),db.productionControlWeek.count(),db.productionControlRevision.count()]).then(counts=>{if(counts.some(n=>n!==0))process.exitCode=1;console.log("Production control tables readable:",counts);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
       - run: >-
           node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();db.ssmaWorkCostSnapshot.count().then(n=>{if(n!==0)process.exitCode=1;console.log("SSMA snapshot table readable:",n);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
       - run: >-
