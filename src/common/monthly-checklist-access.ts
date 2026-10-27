@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedActor } from './supervisor-fleet-scope';
 
 const FULL_MONTHLY_ACCESS_ROLE = 'supervisor_apoio';
+const FULL_ASSISTANCE_ACCESS_ROLES = new Set([FULL_MONTHLY_ACCESS_ROLE, 'admin']);
 
 export type MonthlyChecklistAccessMode = 'OWN' | 'ASSISTANCE';
 
@@ -23,7 +24,7 @@ export async function resolveMonthlyChecklistVehicleWhere(
   const role = (user.role || actor.role || '').trim().toLowerCase();
   if (mode === 'ASSISTANCE') {
     const hasMonthlyAccess =
-      role === FULL_MONTHLY_ACCESS_ROLE ||
+      FULL_ASSISTANCE_ACCESS_ROLES.has(role) ||
       (await prisma.vehicle.count({
         where: {
           active: true,
@@ -66,5 +67,14 @@ export async function canAccessMonthlyChecklist(
     return true;
   }
 
-  return (await prisma.vehicle.count({ where })) > 0;
+  if ((await prisma.vehicle.count({ where })) > 0) return true;
+
+  const assistanceWhere = await resolveMonthlyChecklistVehicleWhere(
+    prisma,
+    actor,
+    'ASSISTANCE',
+  );
+  return assistanceWhere
+    ? (await prisma.vehicle.count({ where: assistanceWhere })) > 0
+    : false;
 }

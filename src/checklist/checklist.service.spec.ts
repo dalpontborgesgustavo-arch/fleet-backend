@@ -129,6 +129,37 @@ describe('ChecklistService monthly fleet photos', () => {
     expect(checklistCreate).toHaveBeenCalledTimes(1);
   });
 
+  it('records administrator assistance under the original responsible', async () => {
+    userFindUnique.mockResolvedValue({
+      id: 'admin-1',
+      role: 'admin',
+      active: true,
+      name: 'Administrador',
+    });
+    vehicleFindFirst.mockResolvedValue({
+      id: 'vehicle-1',
+      monthlyChecklistResponsible: {
+        id: 'responsible-1',
+        name: 'Responsavel Original',
+      },
+    });
+    const dto = monthlyDto();
+    dto.executionMode = 'ASSISTANCE';
+
+    await service.create(dto, { sub: 'admin-1', role: 'admin' });
+
+    expect(checklistCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          createdBy: 'admin-1',
+          monthlyResponsibleUserId: 'responsible-1',
+          monthlyResponsibleName: 'Responsavel Original',
+          assistedExecution: true,
+        }),
+      }),
+    );
+  });
+
   it('requires a time clock device photo when configured on the vehicle', async () => {
     vehicleFindUnique.mockResolvedValue({ hasTimeClockDevice: true });
 
