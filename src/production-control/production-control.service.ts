@@ -263,7 +263,12 @@ export class ProductionControlService {
     };
     const before: Record<string, string | null> = {};
     const after: Record<string, string | null> = {};
-    for (const key of ['engineer', 'workName'] as const) {
+    if ('workName' in body) {
+      throw new BadRequestException(
+        'O nome da obra deve vir do cadastro Aethos pelo código.',
+      );
+    }
+    for (const key of ['engineer'] as const) {
       if (!(key in body)) continue;
       const next = requiredText(
         body[key],
@@ -274,9 +279,24 @@ export class ProductionControlService {
       before[key] = current[key];
       after[key] = next;
     }
-    for (const key of ['municipality', 'workCode'] as const) {
+    if ('workCode' in body) {
+      const work = await this.findWork(
+        requiredText(body.workCode, 'Código da obra', 12),
+      );
+      for (const [key, next] of [
+        ['workCode', work.code],
+        ['workName', work.name],
+        ['municipality', work.municipality || current.municipality],
+      ] as const) {
+        if (next === current[key]) continue;
+        data[key] = next;
+        before[key] = current[key];
+        after[key] = next;
+      }
+    }
+    for (const key of ['municipality'] as const) {
       if (!(key in body)) continue;
-      const next = optionalText(body[key], key === 'workCode' ? 60 : 160);
+      const next = optionalText(body[key], 160);
       if (next === current[key]) continue;
       data[key] = next;
       before[key] = current[key];

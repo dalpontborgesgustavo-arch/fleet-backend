@@ -95,6 +95,64 @@ describe('production control guard and calendar', () => {
       }),
     );
   });
+
+  it('takes the canonical work name when an existing line receives a new code', async () => {
+    const current = {
+      id: 'line-1',
+      workCode: null,
+      workName: 'Rua antiga',
+      municipality: null,
+      engineer: 'GABRIEL BÚRIGO',
+      unitPrice: new Prisma.Decimal(14),
+    };
+    const update = jest.fn(
+      (args: { data: Record<string, unknown> }) => args.data,
+    );
+    const transaction = {
+      productionControlLine: { update },
+      productionControlRevision: { create: jest.fn() },
+    };
+    const prisma = {
+      productionControlLine: {
+        findUnique: jest.fn().mockResolvedValue(current),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      aethosObra: {
+        findUnique: jest.fn().mockResolvedValue({
+          code: '542',
+          name: 'IÇARA - CC 67-2026 - RODOVIA HILDEBRANDO',
+          active: true,
+        }),
+      },
+      constructionControlState: {
+        findUnique: jest.fn().mockResolvedValue({
+          data: {
+            works: [
+              {
+                codigoObra: '542',
+                cidade: 'IÇARA',
+                engenheiro: 'Gabriel Búrigo',
+              },
+            ],
+            engineers: [{ nome: 'GABRIEL BÚRIGO', status: 'Ativo' }],
+          },
+        }),
+      },
+      aethosContract: { findMany: jest.fn().mockResolvedValue([]) },
+      $transaction: (callback: (tx: typeof transaction) => Promise<unknown>) =>
+        callback(transaction),
+    } as unknown as PrismaService;
+    await new ProductionControlService(prisma).updateLine(
+      'line-1',
+      { workCode: '542' },
+      'admin',
+    );
+    expect(update.mock.calls[0][0].data).toMatchObject({
+      workCode: '542',
+      workName: 'IÇARA - CC 67-2026 - RODOVIA HILDEBRANDO',
+      municipality: 'IÇARA',
+    });
+  });
   it('limits access to administrators and the restricted production role', () => {
     expect(assertProductionAccess({ sub: 'admin', role: 'admin' })).toBe(
       'admin',
