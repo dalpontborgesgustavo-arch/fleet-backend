@@ -81,9 +81,13 @@ describe('production control guard and calendar', () => {
           .mockResolvedValue([{ engineerName: 'OUTRO ENGENHEIRO' }]),
       },
       productionControlLine: {
-        findMany: jest
-          .fn()
-          .mockResolvedValue([{ engineer: 'Gabriel', municipality: null }]),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            workName: 'RODOVIA HILDEBRANDO',
+            engineer: 'Gabriel',
+            municipality: null,
+          },
+        ]),
       },
     } as unknown as PrismaService;
     const result = await new ProductionControlService(prisma).findWork('542');
@@ -94,6 +98,46 @@ describe('production control guard and calendar', () => {
         municipality: 'IÇARA',
       }),
     );
+  });
+
+  it('never inherits engineer or city from a historic line whose work code conflicts with Aethos', async () => {
+    const prisma = {
+      aethosObra: {
+        findUnique: jest.fn().mockResolvedValue({
+          code: '511',
+          name: 'SIE/SC - FLORIANOPOLIS - CONTRATO 009/2026',
+          active: true,
+        }),
+      },
+      constructionControlState: {
+        findUnique: jest.fn().mockResolvedValue({
+          data: {
+            works: [{ codigoObra: '558', cidade: 'FLORIANÓPOLIS' }],
+            engineers: [],
+          },
+        }),
+      },
+      aethosContract: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            { engineerName: 'GABRIEL GUISLON BURIGO' },
+            { engineerName: 'MURILO CUSTODIO DA SILVA' },
+          ]),
+      },
+      productionControlLine: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            workName: 'Requalificação Asfaltica',
+            engineer: 'Rafael Carlos',
+            municipality: 'Joinville',
+          },
+        ]),
+      },
+    } as unknown as PrismaService;
+    const result = await new ProductionControlService(prisma).findWork('511');
+    expect(result.engineer).toBeNull();
+    expect(result.municipality).toBe('FLORIANÓPOLIS');
   });
 
   it('takes the canonical work name when an existing line receives a new code', async () => {
