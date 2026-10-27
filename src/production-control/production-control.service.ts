@@ -283,15 +283,21 @@ export class ProductionControlService {
       const work = await this.findWork(
         requiredText(body.workCode, 'Código da obra', 12),
       );
-      for (const [key, next] of [
-        ['workCode', work.code],
-        ['workName', work.name],
-        ['municipality', work.municipality || current.municipality],
-      ] as const) {
-        if (next === current[key]) continue;
-        data[key] = next;
-        before[key] = current[key];
-        after[key] = next;
+      if (work.code !== current.workCode) {
+        data.workCode = work.code;
+        before.workCode = current.workCode;
+        after.workCode = work.code;
+      }
+      if (work.name !== current.workName) {
+        data.workName = work.name;
+        before.workName = current.workName;
+        after.workName = work.name;
+      }
+      const city = work.municipality || current.municipality;
+      if (city !== current.municipality) {
+        data.municipality = city;
+        before.municipality = current.municipality;
+        after.municipality = city;
       }
     }
     for (const key of ['municipality'] as const) {
