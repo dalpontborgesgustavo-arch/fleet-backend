@@ -5,6 +5,82 @@ import {
 import { Prisma } from '@prisma/client';
 
 describe('AethosIntegrationService fiscal fields', () => {
+  it('keeps an explicitly eligible fiscal cost active when its financial title is reparcelled', async () => {
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const prisma = {
+      $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
+        callback({ aethosPlanoContaCost: { upsert } }),
+      ),
+    };
+    const service = new AethosIntegrationService(
+      prisma as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.syncPlanAccountCosts({
+      custosPlanoConta: [
+        {
+          idLancamento: '828340',
+          codigoPlanoConta: '305',
+          competencia: '2026-09',
+          dataLancamento: '2026-09-01',
+          dataEmissaoNotaFiscal: '2026-09-01',
+          valorCusto: 18773.41,
+          status: 'REP',
+          temNotaFiscal: true,
+          idNotaFiscal: '114112',
+          active: true,
+        },
+      ],
+    });
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ active: true, status: 'REP' }),
+        update: expect.objectContaining({ active: true, status: 'REP' }),
+      }),
+    );
+  });
+
+  it('keeps an explicitly cancelled fiscal cost inactive despite an otherwise active financial status', async () => {
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const prisma = {
+      $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
+        callback({ aethosPlanoContaCost: { upsert } }),
+      ),
+    };
+    const service = new AethosIntegrationService(
+      prisma as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.syncPlanAccountCosts({
+      custosPlanoConta: [
+        {
+          idLancamento: 'fiscal-cancelled',
+          codigoPlanoConta: '305',
+          competencia: '2026-09',
+          dataEmissaoNotaFiscal: '2026-09-01',
+          valorCusto: 100,
+          status: 'BXD',
+          temNotaFiscal: true,
+          idNotaFiscal: 'fiscal-note',
+          statusNotaFiscal: 'C',
+          active: false,
+        },
+      ],
+    });
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ active: false, status: 'BXD' }),
+        update: expect.objectContaining({ active: false, status: 'BXD' }),
+      }),
+    );
+  });
+
   it('persists the canonical invoice fields without flattening observations', async () => {
     const upsert = jest.fn().mockResolvedValue(undefined);
     const prisma = {
