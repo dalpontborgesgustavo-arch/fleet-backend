@@ -145,10 +145,7 @@ const includeRncRelations = {
     },
   },
   correctiveActions: {
-    orderBy: [
-      { sequence: 'asc' as const },
-      { createdAt: 'asc' as const },
-    ],
+    orderBy: [{ sequence: 'asc' as const }, { createdAt: 'asc' as const }],
     include: {
       responsibleUser: {
         select: {
@@ -937,8 +934,7 @@ export class RncsService {
         'Selecione um usuario ativo do Sistema JR como responsavel',
       );
     }
-    const responsibleChanged =
-      responsibleUserId !== existing.responsibleUserId;
+    const responsibleChanged = responsibleUserId !== existing.responsibleUserId;
     if (
       responsibleChanged &&
       existing.status !== RncStatus.AWAITING_RESPONSIBLE_ACTION &&
@@ -1298,10 +1294,6 @@ export class RncsService {
       );
     }
 
-    if (!dto.nonConformityAnalysis?.trim()) {
-      throw new BadRequestException('Informe a analise da nao conformidade');
-    }
-
     if (typeof dto.similarNonconformities !== 'boolean') {
       throw new BadRequestException('Informe se existem NCs similares');
     }
@@ -1316,8 +1308,7 @@ export class RncsService {
         dto.causeAnalysisResponsibleUserId?.trim() || null;
       const causeResponsibleChanged = Boolean(
         requestedCauseResponsibleId &&
-          requestedCauseResponsibleId !==
-            currentCauseAssignment?.assignedToId,
+        requestedCauseResponsibleId !== currentCauseAssignment?.assignedToId,
       );
 
       if (
@@ -1358,10 +1349,15 @@ export class RncsService {
         return tx.rnc.update({
           where: { id },
           data: {
-            nonConformityAnalysis: dto.nonConformityAnalysis.trim(),
+            nonConformityAnalysis:
+              dto.nonConformityAnalysis === undefined
+                ? existing.nonConformityAnalysis
+                : trimOptional(dto.nonConformityAnalysis),
             similarNonconformities: dto.similarNonconformities,
             similarNonconformitiesComment:
-              dto.similarNonconformitiesComment?.trim() || null,
+              dto.similarNonconformitiesComment === undefined
+                ? existing.similarNonconformitiesComment
+                : trimOptional(dto.similarNonconformitiesComment),
             history: {
               create: {
                 actorId,
@@ -1428,7 +1424,7 @@ export class RncsService {
         status: dto.needsCorrectiveActionPlan
           ? RncStatus.AWAITING_CAUSE_ANALYSIS
           : RncStatus.RESPONSIBLE_ACTION_COMPLETED,
-        nonConformityAnalysis: dto.nonConformityAnalysis.trim(),
+        nonConformityAnalysis: trimOptional(dto.nonConformityAnalysis),
         similarNonconformities: dto.similarNonconformities,
         similarNonconformitiesComment:
           dto.similarNonconformitiesComment?.trim() || null,
@@ -2211,12 +2207,7 @@ export class RncsService {
     if (!action) {
       throw new NotFoundException('Acao corretiva nao encontrada');
     }
-    this.ensureCorrectiveActionParticipant(
-      current,
-      action,
-      actorId,
-      actorRole,
-    );
+    this.ensureCorrectiveActionParticipant(current, action, actorId, actorRole);
     if (action.situation.toLowerCase().startsWith('conclu')) {
       throw new BadRequestException(
         'Nao e possivel alterar evidencias de uma acao ja concluida',
@@ -2276,12 +2267,7 @@ export class RncsService {
     if (!action) {
       throw new NotFoundException('Acao corretiva nao encontrada');
     }
-    this.ensureCorrectiveActionParticipant(
-      current,
-      action,
-      actorId,
-      actorRole,
-    );
+    this.ensureCorrectiveActionParticipant(current, action, actorId, actorRole);
     if (action.situation.toLowerCase().startsWith('conclu')) {
       throw new BadRequestException(
         'Nao e possivel alterar evidencias de uma acao ja concluida',
@@ -2322,7 +2308,8 @@ export class RncsService {
       'Responsavel da acao',
     );
     const dueDate = parseDate(dto.dueDate, 'Prazo da acao corretiva');
-    const { sequence, responsibleUser } = await this.prisma.$transaction(async (tx) => {
+    const { sequence, responsibleUser } = await this.prisma.$transaction(
+      async (tx) => {
       // Serialize additions to the same plan before calculating its next sequence.
       await tx.$queryRaw`SELECT id FROM "Rnc" WHERE id = ${id} FOR UPDATE`;
       const current = await this.getRnc(id, tx);
@@ -2403,7 +2390,8 @@ export class RncsService {
         },
       });
       return { sequence: nextSequence, responsibleUser };
-    });
+      },
+    );
 
     const updatedRnc = await this.getRnc(id);
     this.notifyUsers([responsibleUser.id], {
@@ -2584,12 +2572,7 @@ export class RncsService {
     if (!action) {
       throw new NotFoundException('Acao corretiva nao encontrada');
     }
-    this.ensureCorrectiveActionParticipant(
-      current,
-      action,
-      actorId,
-      actorRole,
-    );
+    this.ensureCorrectiveActionParticipant(current, action, actorId, actorRole);
     if (action.situation.toLowerCase().startsWith('conclu')) {
       throw new BadRequestException('Esta acao corretiva ja foi concluida');
     }
@@ -3297,7 +3280,8 @@ export class RncsService {
       normalized &&
       normalized !== 'motorista' &&
       normalized !== 'operador'
-    ) return;
+    )
+      return;
     throw new ForbiddenException('Sem permissao para criar este tipo de RNC');
   }
 
@@ -3315,11 +3299,8 @@ export class RncsService {
     const role = normalizeRole(actorRole);
     if (canReadAllRncs(role)) return;
     if (isEngineeringRole(role)) return;
-    if (
-      actorId &&
-      rnc.type === RncType.INTERNAL &&
-      rnc.engineerId === actorId
-    ) return;
+    if (actorId && rnc.type === RncType.INTERNAL && rnc.engineerId === actorId)
+      return;
     if (
       isResponsibilityOnlyRole(role) &&
       actorId &&
@@ -3862,7 +3843,9 @@ export class RncsService {
     const typeLabel = getRncTypeLabel(String(rnc.type));
     const reference =
       rnc.obraDescricao || rnc.obra || rnc.cliente || 'Sem referencia';
-    const configuredTestRecipient = normalizeEmail(process.env.RNC_EMAIL_TEST_TO);
+    const configuredTestRecipient = normalizeEmail(
+      process.env.RNC_EMAIL_TEST_TO,
+    );
     const deliveries = configuredTestRecipient
       ? [
           {

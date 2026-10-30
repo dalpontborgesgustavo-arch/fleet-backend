@@ -55,9 +55,7 @@ describe('RncsService issuer changes before manager action', () => {
         },
         'issuer-1',
       ),
-    ).toThrow(
-      'A RNC so pode ser editada antes da primeira acao do gestor',
-    );
+    ).toThrow('A RNC so pode ser editada antes da primeira acao do gestor');
   });
 
   it('blocks every non-pending manager state', () => {
@@ -66,9 +64,7 @@ describe('RncsService issuer changes before manager action', () => {
         { ...pendingRnc, status: 'IN_PROGRESS' },
         'issuer-1',
       ),
-    ).toThrow(
-      'A RNC so pode ser editada antes da primeira acao do gestor',
-    );
+    ).toThrow('A RNC so pode ser editada antes da primeira acao do gestor');
   });
 });
 
@@ -285,7 +281,12 @@ describe('RncsService consultant internal RNC test access', () => {
   it.each(['admin', 'administrador'])(
     'allows %s to create all RNC types',
     (role) => {
-      const service = new RncsService({} as any, {} as any, {} as any, {} as any);
+      const service = new RncsService(
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+      );
 
       for (const type of ['EXTERNAL', 'WORK', 'INTERNAL']) {
         expect(() =>
@@ -610,6 +611,60 @@ describe('RncsService corrective action execution evidence', () => {
   });
 });
 
+describe('RncsService simplified internal treatment', () => {
+  it('accepts the decision checkboxes without narrative comments', async () => {
+    const existing = {
+      id: 'rnc-109',
+      number: 109,
+      type: 'INTERNAL',
+      status: 'AWAITING_RESPONSIBLE_ACTION',
+      responsibleUserId: 'responsible-1',
+      engineerId: 'issuer-1',
+    };
+    const update = jest
+      .fn()
+      .mockResolvedValue({
+        ...existing,
+        status: 'RESPONSIBLE_ACTION_COMPLETED',
+      });
+    const notifyUsers = jest.fn().mockResolvedValue(undefined);
+    const service = new RncsService(
+      { rnc: { update } } as any,
+      { notifyUsers } as any,
+      {} as any,
+      {} as any,
+    );
+    jest.spyOn(service as any, 'getRnc').mockResolvedValue(existing);
+    jest
+      .spyOn(service as any, 'serialize')
+      .mockImplementation((rnc: unknown) => rnc);
+
+    await service.submitResponsibleAction(
+      'rnc-109',
+      { similarNonconformities: true, needsCorrectiveActionPlan: false },
+      'responsible-1',
+      'qualidade',
+    );
+
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          nonConformityAnalysis: null,
+          similarNonconformities: true,
+          similarNonconformitiesComment: null,
+          needsCorrectiveActionPlan: false,
+        }),
+      }),
+    );
+    expect(notifyUsers).toHaveBeenCalledWith(
+      ['issuer-1'],
+      expect.objectContaining({
+        title: 'RNC Interna para verificacao de eficacia',
+      }),
+    );
+  });
+});
+
 describe('RncsService add corrective action to an ongoing plan', () => {
   const currentRnc = (overrides: Record<string, unknown> = {}) => ({
     id: 'rnc-108',
@@ -648,8 +703,8 @@ describe('RncsService add corrective action to an ongoing plan', () => {
       rncHistory: { create: historyCreate },
     };
     const prisma = {
-      $transaction: jest.fn((callback: (client: typeof tx) => Promise<unknown>) =>
-        callback(tx),
+      $transaction: jest.fn(
+        (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
       ),
     };
     const service = new RncsService(
@@ -659,9 +714,15 @@ describe('RncsService add corrective action to an ongoing plan', () => {
       {} as any,
     );
     jest.spyOn(service as any, 'getRnc').mockResolvedValue(rnc);
-    jest.spyOn(service as any, 'ensureCanRead').mockImplementation(() => undefined);
-    jest.spyOn(service as any, 'sendInternalRncTaskEmail').mockResolvedValue(undefined);
-    jest.spyOn(service as any, 'serialize').mockImplementation((value: unknown) => value);
+    jest
+      .spyOn(service as any, 'ensureCanRead')
+      .mockImplementation(() => undefined);
+    jest
+      .spyOn(service as any, 'sendInternalRncTaskEmail')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'serialize')
+      .mockImplementation((value: unknown) => value);
     return { service, create, historyCreate, tx };
   };
 
@@ -675,7 +736,12 @@ describe('RncsService add corrective action to an ongoing plan', () => {
     'lets %s append without replacing existing actions',
     async (actorId) => {
       const { service, create, historyCreate, tx } = makeService();
-      await service.addCorrectiveAction('rnc-108', payload, actorId, 'engenharia');
+      await service.addCorrectiveAction(
+        'rnc-108',
+        payload,
+        actorId,
+        'engenharia',
+      );
       expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
       expect(create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -699,7 +765,12 @@ describe('RncsService add corrective action to an ongoing plan', () => {
   it('rejects an unrelated user even when they can read the RNC', async () => {
     const { service, create } = makeService();
     await expect(
-      service.addCorrectiveAction('rnc-108', payload, 'unrelated', 'engenharia'),
+      service.addCorrectiveAction(
+        'rnc-108',
+        payload,
+        'unrelated',
+        'engenharia',
+      ),
     ).rejects.toThrow('Somente o emitente ou responsavel');
     expect(create).not.toHaveBeenCalled();
   });
@@ -712,7 +783,12 @@ describe('RncsService add corrective action to an ongoing plan', () => {
         ],
       }),
     );
-    await service.addCorrectiveAction('rnc-108', payload, 'issuer', 'engenharia');
+    await service.addCorrectiveAction(
+      'rnc-108',
+      payload,
+      'issuer',
+      'engenharia',
+    );
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({ sequence: 2, situation: 'Pendente' }),
     });
