@@ -401,6 +401,21 @@ export class OccurrencesService {
           message: 'Já existe uma ocorrência aberta para esta frota e pergunta.',
         });
       }
+
+      // A triagem mensal tem um dono nominal até a manutenção definir o executor.
+      // Um cadastro ausente ou ambíguo não pode impedir o envio do checklist.
+      const triageOwners = await tx.user.findMany({
+        where: {
+          active: true,
+          role: { equals: 'manutencao', mode: 'insensitive' },
+          name: { equals: 'Filipe Crispim Neto', mode: 'insensitive' },
+        },
+        select: { id: true },
+        take: 2,
+      });
+      data.triageOwnerUserId = triageOwners.length === 1
+        ? triageOwners[0].id
+        : null;
       return tx.occurrence.create({ data, include: includeOccurrenceRelations });
     });
   }

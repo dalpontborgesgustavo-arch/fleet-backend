@@ -1418,6 +1418,7 @@ model Occurrence {
   localExecucao           String?
   responsavelUserId       String?
   maintenanceTargetUserId String?
+  triageOwnerUserId       String?
   dataEntrada             DateTime?
   dataPrevistaSaida       DateTime?
   entregaLimiteEm         DateTime?
