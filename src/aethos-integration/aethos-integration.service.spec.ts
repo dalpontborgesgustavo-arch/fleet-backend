@@ -5,7 +5,7 @@ import {
 import { Prisma } from '@prisma/client';
 
 describe('AethosIntegrationService fiscal fields', () => {
-  it('keeps an explicitly eligible fiscal cost active when its financial title is reparcelled', async () => {
+  it('persists fiscal eligibility separately from a reparcelled financial title', async () => {
     const upsert = jest.fn().mockResolvedValue(undefined);
     const prisma = {
       $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
@@ -30,20 +30,29 @@ describe('AethosIntegrationService fiscal fields', () => {
           status: 'REP',
           temNotaFiscal: true,
           idNotaFiscal: '114112',
-          active: true,
+          fiscalBudgetEligible: true,
+          active: false,
         },
       ],
     });
 
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({ active: true, status: 'REP' }),
-        update: expect.objectContaining({ active: true, status: 'REP' }),
+        create: expect.objectContaining({
+          active: false,
+          status: 'REP',
+          fiscalBudgetEligible: true,
+        }),
+        update: expect.objectContaining({
+          active: false,
+          status: 'REP',
+          fiscalBudgetEligible: true,
+        }),
       }),
     );
   });
 
-  it('keeps an explicitly cancelled fiscal cost inactive despite an otherwise active financial status', async () => {
+  it('persists fiscal ineligibility separately from an active financial title', async () => {
     const upsert = jest.fn().mockResolvedValue(undefined);
     const prisma = {
       $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
@@ -68,17 +77,50 @@ describe('AethosIntegrationService fiscal fields', () => {
           temNotaFiscal: true,
           idNotaFiscal: 'fiscal-note',
           statusNotaFiscal: 'C',
-          active: false,
+          fiscalBudgetEligible: false,
+          active: true,
         },
       ],
     });
 
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({ active: false, status: 'BXD' }),
-        update: expect.objectContaining({ active: false, status: 'BXD' }),
+        create: expect.objectContaining({
+          active: true,
+          status: 'BXD',
+          fiscalBudgetEligible: false,
+        }),
+        update: expect.objectContaining({
+          active: true,
+          status: 'BXD',
+          fiscalBudgetEligible: false,
+        }),
       }),
     );
+  });
+
+  it('rejects fiscal eligibility without an identified invoice and issue date', async () => {
+    const transaction = jest.fn();
+    const service = new AethosIntegrationService(
+      { $transaction: transaction } as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.syncPlanAccountCosts({
+        custosPlanoConta: [
+          {
+            idLancamento: 'unlinked',
+            codigoPlanoConta: '305',
+            competencia: '2026-09',
+            valorCusto: 100,
+            fiscalBudgetEligible: true,
+          },
+        ],
+      }),
+    ).rejects.toThrow('Elegibilidade fiscal exige nota fiscal vinculada');
+    expect(transaction).not.toHaveBeenCalled();
   });
 
   it('persists the canonical invoice fields without flattening observations', async () => {

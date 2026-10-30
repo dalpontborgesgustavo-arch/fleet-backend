@@ -230,11 +230,17 @@ describe('BudgetAnalysisService invoice issue basis', () => {
     expect(findPlanAccountRows).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          active: true,
           codigoPlanoConta: '10',
           OR: [
-            { temNotaFiscal: true, dataEmissaoNotaFiscal: range },
-            { temNotaFiscal: false, dataLancamento: range },
+            {
+              temNotaFiscal: true,
+              dataEmissaoNotaFiscal: range,
+              OR: [
+                { fiscalBudgetEligible: true },
+                { fiscalBudgetEligible: null, active: true },
+              ],
+            },
+            { temNotaFiscal: false, active: true, dataLancamento: range },
           ],
           AND: [
             {

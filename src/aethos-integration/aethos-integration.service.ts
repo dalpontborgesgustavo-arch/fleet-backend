@@ -59,6 +59,7 @@ type SyncPlanAccountCost = {
   idNotaFiscal: string | null;
   numeroNotaFiscal: string | null;
   dataEmissaoNotaFiscal: Date | null;
+  fiscalBudgetEligible: boolean | null;
   observacaoLancamento: string | null;
   observacaoNotaFiscal: string | null;
   valorCusto: Prisma.Decimal;
@@ -727,6 +728,13 @@ function normalizePlanAccountCosts(body: unknown) {
             'dataEmissaoNotaFiscal',
             'data_emissao_nota_fiscal',
             'DATA_EMISSAO_NOTA_FISCAL',
+          ]),
+        ),
+        fiscalBudgetEligible: normalizeNullableBoolean(
+          pick(row, [
+            'fiscalBudgetEligible',
+            'fiscal_budget_eligible',
+            'FISCAL_BUDGET_ELIGIBLE',
           ]),
         ),
         observacaoLancamento:
@@ -1794,6 +1802,20 @@ export class AethosIntegrationService {
       );
     }
 
+    if (
+      custos.some(
+        (custo) =>
+          custo.fiscalBudgetEligible === true &&
+          (!custo.temNotaFiscal ||
+            !custo.idNotaFiscal ||
+            !custo.dataEmissaoNotaFiscal),
+      )
+    ) {
+      throw new BadRequestException(
+        'Elegibilidade fiscal exige nota fiscal vinculada e data de emissao',
+      );
+    }
+
     const now = new Date();
     const rawRows = listFromBody(body, [
       'custosPlanoConta',
@@ -1829,6 +1851,7 @@ export class AethosIntegrationService {
             idNotaFiscal: custo.idNotaFiscal,
             numeroNotaFiscal: custo.numeroNotaFiscal,
             dataEmissaoNotaFiscal: custo.dataEmissaoNotaFiscal,
+            fiscalBudgetEligible: custo.fiscalBudgetEligible,
             observacaoLancamento: custo.observacaoLancamento,
             observacaoNotaFiscal: custo.observacaoNotaFiscal,
             valorCusto: custo.valorCusto,
@@ -1860,6 +1883,7 @@ export class AethosIntegrationService {
             idNotaFiscal: custo.idNotaFiscal,
             numeroNotaFiscal: custo.numeroNotaFiscal,
             dataEmissaoNotaFiscal: custo.dataEmissaoNotaFiscal,
+            fiscalBudgetEligible: custo.fiscalBudgetEligible,
             observacaoLancamento: custo.observacaoLancamento,
             observacaoNotaFiscal: custo.observacaoNotaFiscal,
             valorCusto: custo.valorCusto,

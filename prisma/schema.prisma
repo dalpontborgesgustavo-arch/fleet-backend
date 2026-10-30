@@ -403,6 +403,7 @@ model AethosPlanoContaCost {
   idNotaFiscal           String?
   numeroNotaFiscal       String?
   dataEmissaoNotaFiscal  DateTime?
+  fiscalBudgetEligible   Boolean?
   observacaoLancamento   String?   @db.Text
   observacaoNotaFiscal   String?   @db.Text
   valorCusto             Decimal   @db.Decimal(18, 2)
