@@ -1,0 +1,1 @@
+CREATE TABLE "Occurrence" ("id" TEXT PRIMARY KEY);
