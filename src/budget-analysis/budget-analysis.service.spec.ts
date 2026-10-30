@@ -240,7 +240,12 @@ describe('BudgetAnalysisService invoice issue basis', () => {
                 { fiscalBudgetEligible: null, active: true },
               ],
             },
-            { temNotaFiscal: false, active: true, dataLancamento: range },
+            {
+              temNotaFiscal: false,
+              active: true,
+              fiscalBudgetEligible: null,
+              dataLancamento: range,
+            },
           ],
           AND: [
             {

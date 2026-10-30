@@ -647,6 +647,7 @@ function planAccountWhereByDateBasis(
         {
           temNotaFiscal: false,
           active: true,
+          fiscalBudgetEligible: null,
           dataLancamento: {
             gte: range.start,
             lt: range.end,

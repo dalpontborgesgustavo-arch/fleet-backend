@@ -99,6 +99,46 @@ describe('AethosIntegrationService fiscal fields', () => {
     );
   });
 
+  it('can flag a proven non-invoice financial replacement without changing its active status', async () => {
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const prisma = {
+      $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
+        callback({ aethosPlanoContaCost: { upsert } }),
+      ),
+    };
+    const service = new AethosIntegrationService(
+      prisma as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.syncPlanAccountCosts({
+      custosPlanoConta: [
+        {
+          idLancamento: 'financial-replacement',
+          codigoPlanoConta: '50',
+          competencia: '2026-09',
+          dataLancamento: '2026-09-01',
+          valorCusto: 68.6,
+          status: 'BXD',
+          temNotaFiscal: false,
+          fiscalBudgetEligible: false,
+          active: true,
+        },
+      ],
+    });
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          active: true,
+          temNotaFiscal: false,
+          fiscalBudgetEligible: false,
+        }),
+      }),
+    );
+  });
+
   it('rejects fiscal eligibility without an identified invoice and issue date', async () => {
     const transaction = jest.fn();
     const service = new AethosIntegrationService(
