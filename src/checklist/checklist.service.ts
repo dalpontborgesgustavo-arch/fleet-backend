@@ -588,10 +588,29 @@ export class ChecklistService {
       return [];
     }
 
-    const vehicleIds = scope
+    const requestedType = cleanQueryText(query.type).toUpperCase();
+    let visibleVehicleWhere: Prisma.VehicleWhereInput | null = scope || null;
+    if (scope && requestedType === 'MONTHLY') {
+      // The mobile app compares this list with monthly-vehicles. Include the
+      // same own/assistance domain so a completed checklist never reappears
+      // as pending merely because its vehicle is in another filial/type.
+      const ownWhere = await resolveMonthlyChecklistVehicleWhere(this.prisma, actor);
+      const assistanceWhere = await resolveMonthlyChecklistVehicleWhere(
+        this.prisma,
+        actor,
+        'ASSISTANCE',
+      );
+      visibleVehicleWhere = {
+        OR: [scope, ownWhere, assistanceWhere].filter(
+          (where): where is Prisma.VehicleWhereInput => where !== null,
+        ),
+      };
+    }
+
+    const vehicleIds = visibleVehicleWhere
       ? (
           await this.prisma.vehicle.findMany({
-            where: scope,
+            where: visibleVehicleWhere,
             select: { id: true },
           })
         ).map((vehicle) => vehicle.id)
@@ -602,7 +621,6 @@ export class ChecklistService {
       filters.push({ vehicleId: { in: vehicleIds } });
     }
 
-    const requestedType = cleanQueryText(query.type).toUpperCase();
     if (requestedType === 'DAILY' || requestedType === 'MONTHLY') {
       filters.push({ type: requestedType });
     }
