@@ -6,7 +6,7 @@ export class RncCorrectiveActionDto {
 }
 
 export class SubmitRncResponsibleActionDto {
-  nonConformityAnalysis!: string;
+  nonConformityAnalysis?: string | null;
   similarNonconformities!: boolean;
   similarNonconformitiesComment?: string | null;
   needsCorrectiveActionPlan!: boolean;
