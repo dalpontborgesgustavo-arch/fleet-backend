@@ -52,6 +52,43 @@ describe('AethosIntegrationService fiscal fields', () => {
     );
   });
 
+  it('preserves a validated fiscal classification when an older sender omits the field', async () => {
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const prisma = {
+      $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
+        callback({ aethosPlanoContaCost: { upsert } }),
+      ),
+    };
+    const service = new AethosIntegrationService(
+      prisma as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.syncPlanAccountCosts({
+      custosPlanoConta: [
+        {
+          idLancamento: '828340',
+          codigoPlanoConta: '305',
+          competencia: '2026-09',
+          valorCusto: 18773.41,
+          status: 'REP',
+          temNotaFiscal: true,
+          idNotaFiscal: '114112',
+          dataEmissaoNotaFiscal: '2026-09-01',
+          active: false,
+        },
+      ],
+    });
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ fiscalBudgetEligible: null }),
+        update: expect.objectContaining({ fiscalBudgetEligible: undefined }),
+      }),
+    );
+  });
+
   it('persists fiscal ineligibility separately from an active financial title', async () => {
     const upsert = jest.fn().mockResolvedValue(undefined);
     const prisma = {

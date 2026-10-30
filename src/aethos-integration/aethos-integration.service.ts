@@ -60,6 +60,7 @@ type SyncPlanAccountCost = {
   numeroNotaFiscal: string | null;
   dataEmissaoNotaFiscal: Date | null;
   fiscalBudgetEligible: boolean | null;
+  fiscalBudgetEligibilityProvided: boolean;
   observacaoLancamento: string | null;
   observacaoNotaFiscal: string | null;
   valorCusto: Prisma.Decimal;
@@ -737,6 +738,11 @@ function normalizePlanAccountCosts(body: unknown) {
             'FISCAL_BUDGET_ELIGIBLE',
           ]),
         ),
+        fiscalBudgetEligibilityProvided: [
+          'fiscalBudgetEligible',
+          'fiscal_budget_eligible',
+          'FISCAL_BUDGET_ELIGIBLE',
+        ].some((key) => Object.prototype.hasOwnProperty.call(row, key)),
         observacaoLancamento:
           normalizeLongText(
             pick(row, [
@@ -1883,7 +1889,9 @@ export class AethosIntegrationService {
             idNotaFiscal: custo.idNotaFiscal,
             numeroNotaFiscal: custo.numeroNotaFiscal,
             dataEmissaoNotaFiscal: custo.dataEmissaoNotaFiscal,
-            fiscalBudgetEligible: custo.fiscalBudgetEligible,
+            fiscalBudgetEligible: custo.fiscalBudgetEligibilityProvided
+              ? custo.fiscalBudgetEligible
+              : undefined,
             observacaoLancamento: custo.observacaoLancamento,
             observacaoNotaFiscal: custo.observacaoNotaFiscal,
             valorCusto: custo.valorCusto,
