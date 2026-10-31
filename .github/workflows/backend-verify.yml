@@ -95,6 +95,8 @@ jobs:
       - run: >-
           node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();db.$queryRaw`SELECT column_name FROM information_schema.columns WHERE table_name = ${"AethosPlanoContaCost"} AND column_name = ${"fiscalBudgetEligible"}`.then(rows=>{if(rows.length!==1)process.exitCode=1;console.log("Fiscal budget eligibility column readable:",rows.length);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
       - run: >-
+          node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();db.aethosFiscalBudgetEligibilityBatch.count().then(n=>{if(n!==0)process.exitCode=1;console.log("Fiscal eligibility audit table readable:",n);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
+      - run: >-
           node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();db.$queryRaw`SELECT column_name FROM information_schema.columns WHERE table_name = ${"Occurrence"} AND column_name = ${"triageOwnerUserId"}`.then(rows=>{if(rows.length!==1)process.exitCode=1;console.log("Monthly triage owner column readable:",rows.length);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
       - run: >-
           node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();Promise.all([db.productionControlLine.count(),db.productionControlDaily.count(),db.productionControlWeek.count(),db.productionControlRevision.count()]).then(counts=>{if(counts.some(n=>n!==0))process.exitCode=1;console.log("Production control tables readable:",counts);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
