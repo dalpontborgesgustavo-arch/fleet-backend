@@ -945,7 +945,7 @@ function normalizeFiscalEligibilityIds(body: unknown) {
   }
   const normalized = ids.map((id) => normalizeText(id));
   if (
-    normalized.some((id) => !id) ||
+    normalized.some((id) => !/^\d{1,20}$/.test(id)) ||
     new Set(normalized).size !== normalized.length
   ) {
     throw new BadRequestException('IDs de lancamento vazios ou repetidos');
@@ -976,7 +976,10 @@ function normalizeFiscalEligibilityBatch(body: unknown) {
     const row = value as AnyRow;
     const idLancamento = normalizeText(row.idLancamento);
     const preimageHash = normalizeText(row.preimageHash).toLowerCase();
-    if (!idLancamento || !/^[a-f0-9]{64}$/.test(preimageHash)) {
+    if (
+      !/^\d{1,20}$/.test(idLancamento) ||
+      !/^[a-f0-9]{64}$/.test(preimageHash)
+    ) {
       throw new BadRequestException('ID ou preimagem fiscal invalida');
     }
     if (typeof row.fiscalBudgetEligible !== 'boolean') {
