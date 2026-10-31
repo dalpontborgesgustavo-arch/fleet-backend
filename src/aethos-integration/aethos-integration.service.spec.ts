@@ -5,6 +5,412 @@ import {
 import { Prisma } from '@prisma/client';
 
 describe('AethosIntegrationService fiscal fields', () => {
+  const fiscalRow = () => ({
+    id: 'cost-1',
+    origem: 'VW_LST_CONTAS_PAGAR',
+    idLancamento: '828340',
+    codigoEmpresa: '1',
+    codigoPlanoConta: '305',
+    valorCusto: new Prisma.Decimal('18773.41'),
+    active: false,
+    status: 'REP',
+    temNotaFiscal: true,
+    idNotaFiscal: '114112',
+    numeroNotaFiscal: '114112',
+    dataEmissaoNotaFiscal: new Date('2026-09-01T00:00:00.000Z'),
+    dataLancamento: new Date('2026-09-10T00:00:00.000Z'),
+    fiscalBudgetEligible: null,
+    deactivationReason: null,
+    reconciliationId: null,
+    syncedAt: new Date('2026-10-30T12:00:00.000Z'),
+    updatedAt: new Date('2026-10-30T12:00:00.000Z'),
+  });
+
+  it('reads a bounded fiscal preimage and changes only eligibility on existing rows', async () => {
+    const row = fiscalRow();
+    const findMany = jest.fn().mockResolvedValue([row]);
+    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const findUnique = jest.fn().mockResolvedValue(null);
+    const create = jest.fn().mockImplementation(({ data }) =>
+      Promise.resolve({
+        ...data,
+        executedAt: new Date('2026-10-30T13:00:00.000Z'),
+      }),
+    );
+    const tx = {
+      aethosPlanoContaCost: { findMany, updateMany },
+      aethosFiscalBudgetEligibilityBatch: { findUnique, create },
+    };
+    const prisma = {
+      ...tx,
+      $transaction: jest.fn((callback: (client: unknown) => unknown) =>
+        callback(tx),
+      ),
+    };
+    const service = new AethosIntegrationService(
+      prisma as never,
+      {} as never,
+      {} as never,
+    );
+
+    const readback = await service.readFiscalBudgetEligibility({
+      idLancamentos: ['828340'],
+    });
+    expect(readback.foundCount).toBe(1);
+    expect(readback.rows[0]).toMatchObject({
+      idLancamento: '828340',
+      active: false,
+      status: 'REP',
+      valorCusto: '18773.41',
+      fiscalBudgetEligible: null,
+      preimageHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+
+    const payload = {
+      runId: 'fiscal-control-20261030-1',
+      updates: [
+        {
+          idLancamento: '828340',
+          fiscalBudgetEligible: true,
+          preimageHash: readback.rows[0].preimageHash,
+        },
+      ],
+    };
+    const preview = await service.reconcileFiscalBudgetEligibility(payload);
+    expect(preview).toMatchObject({
+      ok: true,
+      executed: false,
+      wouldChangeCount: 1,
+    });
+    expect(updateMany).not.toHaveBeenCalled();
+
+    const result = await service.reconcileFiscalBudgetEligibility({
+      ...payload,
+      execute: true,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      executed: true,
+      replayed: false,
+      changedCount: 1,
+    });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: 'cost-1',
+        syncedAt: row.syncedAt,
+        updatedAt: row.updatedAt,
+        fiscalBudgetEligible: null,
+      }),
+      data: { fiscalBudgetEligible: true },
+    });
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        requestedCount: 1,
+        changedCount: 1,
+        alreadyCount: 0,
+      }),
+    });
+  });
+
+  it('rejects stale fiscal preimages atomically before updating any row', async () => {
+    const findMany = jest.fn().mockResolvedValue([fiscalRow()]);
+    const updateMany = jest.fn();
+    const create = jest.fn();
+    const tx = {
+      aethosPlanoContaCost: { findMany, updateMany },
+      aethosFiscalBudgetEligibilityBatch: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create,
+      },
+    };
+    const service = new AethosIntegrationService(
+      {
+        ...tx,
+        $transaction: jest.fn((callback: (client: unknown) => unknown) =>
+          callback(tx),
+        ),
+      } as never,
+      {} as never,
+      {} as never,
+    );
+    await expect(
+      service.reconcileFiscalBudgetEligibility({
+        runId: 'fiscal-stale-1',
+        execute: true,
+        updates: [
+          {
+            idLancamento: '828340',
+            fiscalBudgetEligible: true,
+            preimageHash: '0'.repeat(64),
+          },
+        ],
+      }),
+    ).rejects.toThrow('Lote fiscal rejeitado');
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('does not classify a manually excluded cost or an invoice without proof', async () => {
+    const manual = { ...fiscalRow(), deactivationReason: 'MANUAL' };
+    const noInvoice = {
+      ...fiscalRow(),
+      temNotaFiscal: false,
+      idNotaFiscal: null,
+      dataEmissaoNotaFiscal: null,
+    };
+    const findMany = jest
+      .fn()
+      .mockResolvedValueOnce([manual])
+      .mockResolvedValueOnce([noInvoice]);
+    const prisma = {
+      aethosPlanoContaCost: { findMany },
+      aethosFiscalBudgetEligibilityBatch: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+    };
+    const service = new AethosIntegrationService(
+      prisma as never,
+      {} as never,
+      {} as never,
+    );
+    const manualPreimage = (
+      await service.readFiscalBudgetEligibility({
+        idLancamentos: ['828340'],
+      })
+    ).rows[0].preimageHash;
+    const noInvoicePreimage = (
+      await service.readFiscalBudgetEligibility({
+        idLancamentos: ['828340'],
+      })
+    ).rows[0].preimageHash;
+
+    findMany.mockResolvedValueOnce([manual]).mockResolvedValueOnce([noInvoice]);
+    const manualResult = await service.reconcileFiscalBudgetEligibility({
+      runId: 'fiscal-manual-1',
+      updates: [
+        {
+          idLancamento: '828340',
+          fiscalBudgetEligible: true,
+          preimageHash: manualPreimage,
+        },
+      ],
+    });
+    const missingInvoiceResult = await service.reconcileFiscalBudgetEligibility(
+      {
+        runId: 'fiscal-no-invoice-1',
+        updates: [
+          {
+            idLancamento: '828340',
+            fiscalBudgetEligible: true,
+            preimageHash: noInvoicePreimage,
+          },
+        ],
+      },
+    );
+    expect(manualResult).toMatchObject({
+      ok: false,
+      rejected: [{ reason: 'manual_or_unknown_exclusion' }],
+    });
+    expect(missingInvoiceResult).toMatchObject({
+      ok: false,
+      rejected: [{ reason: 'invoice_not_proven' }],
+    });
+  });
+  it('persists fiscal eligibility separately from a reparcelled financial title', async () => {
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const prisma = {
+      $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
+        callback({ aethosPlanoContaCost: { upsert } }),
+      ),
+    };
+    const service = new AethosIntegrationService(
+      prisma as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.syncPlanAccountCosts({
+      custosPlanoConta: [
+        {
+          idLancamento: '828340',
+          codigoPlanoConta: '305',
+          competencia: '2026-09',
+          dataLancamento: '2026-09-01',
+          dataEmissaoNotaFiscal: '2026-09-01',
+          valorCusto: 18773.41,
+          status: 'REP',
+          temNotaFiscal: true,
+          idNotaFiscal: '114112',
+          fiscalBudgetEligible: true,
+          active: false,
+        },
+      ],
+    });
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          active: false,
+          status: 'REP',
+          fiscalBudgetEligible: true,
+        }),
+        update: expect.objectContaining({
+          active: false,
+          status: 'REP',
+          fiscalBudgetEligible: true,
+        }),
+      }),
+    );
+  });
+
+  it('preserves a validated fiscal classification when an older sender omits the field', async () => {
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const prisma = {
+      $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
+        callback({ aethosPlanoContaCost: { upsert } }),
+      ),
+    };
+    const service = new AethosIntegrationService(
+      prisma as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.syncPlanAccountCosts({
+      custosPlanoConta: [
+        {
+          idLancamento: '828340',
+          codigoPlanoConta: '305',
+          competencia: '2026-09',
+          valorCusto: 18773.41,
+          status: 'REP',
+          temNotaFiscal: true,
+          idNotaFiscal: '114112',
+          dataEmissaoNotaFiscal: '2026-09-01',
+          active: false,
+        },
+      ],
+    });
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ fiscalBudgetEligible: null }),
+        update: expect.objectContaining({ fiscalBudgetEligible: undefined }),
+      }),
+    );
+  });
+
+  it('persists fiscal ineligibility separately from an active financial title', async () => {
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const prisma = {
+      $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
+        callback({ aethosPlanoContaCost: { upsert } }),
+      ),
+    };
+    const service = new AethosIntegrationService(
+      prisma as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.syncPlanAccountCosts({
+      custosPlanoConta: [
+        {
+          idLancamento: 'fiscal-cancelled',
+          codigoPlanoConta: '305',
+          competencia: '2026-09',
+          dataEmissaoNotaFiscal: '2026-09-01',
+          valorCusto: 100,
+          status: 'BXD',
+          temNotaFiscal: true,
+          idNotaFiscal: 'fiscal-note',
+          statusNotaFiscal: 'C',
+          fiscalBudgetEligible: false,
+          active: true,
+        },
+      ],
+    });
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          active: true,
+          status: 'BXD',
+          fiscalBudgetEligible: false,
+        }),
+        update: expect.objectContaining({
+          active: true,
+          status: 'BXD',
+          fiscalBudgetEligible: false,
+        }),
+      }),
+    );
+  });
+
+  it('can flag a proven non-invoice financial replacement without changing its active status', async () => {
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const prisma = {
+      $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
+        callback({ aethosPlanoContaCost: { upsert } }),
+      ),
+    };
+    const service = new AethosIntegrationService(
+      prisma as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.syncPlanAccountCosts({
+      custosPlanoConta: [
+        {
+          idLancamento: 'financial-replacement',
+          codigoPlanoConta: '50',
+          competencia: '2026-09',
+          dataLancamento: '2026-09-01',
+          valorCusto: 68.6,
+          status: 'BXD',
+          temNotaFiscal: false,
+          fiscalBudgetEligible: false,
+          active: true,
+        },
+      ],
+    });
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          active: true,
+          temNotaFiscal: false,
+          fiscalBudgetEligible: false,
+        }),
+      }),
+    );
+  });
+
+  it('rejects fiscal eligibility without an identified invoice and issue date', async () => {
+    const transaction = jest.fn();
+    const service = new AethosIntegrationService(
+      { $transaction: transaction } as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.syncPlanAccountCosts({
+        custosPlanoConta: [
+          {
+            idLancamento: 'unlinked',
+            codigoPlanoConta: '305',
+            competencia: '2026-09',
+            valorCusto: 100,
+            fiscalBudgetEligible: true,
+          },
+        ],
+      }),
+    ).rejects.toThrow('Elegibilidade fiscal exige nota fiscal vinculada');
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
   it('persists the canonical invoice fields without flattening observations', async () => {
     const upsert = jest.fn().mockResolvedValue(undefined);
     const prisma = {

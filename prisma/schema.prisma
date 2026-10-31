@@ -403,6 +403,7 @@ model AethosPlanoContaCost {
   idNotaFiscal           String?
   numeroNotaFiscal       String?
   dataEmissaoNotaFiscal  DateTime?
+  fiscalBudgetEligible   Boolean?
   observacaoLancamento   String?   @db.Text
   observacaoNotaFiscal   String?   @db.Text
   valorCusto             Decimal   @db.Decimal(18, 2)
@@ -453,6 +454,20 @@ model AethosPlanoContaCostReconciliation {
 
   @@index([origin])
   @@index([rule])
+  @@index([executedAt])
+}
+
+model AethosFiscalBudgetEligibilityBatch {
+  id             String   @id @default(uuid())
+  runId          String   @unique
+  payloadHash    String
+  origin         String
+  requestedCount Int
+  changedCount   Int
+  alreadyCount   Int
+  updates        Json
+  executedAt     DateTime @default(now())
+
   @@index([executedAt])
 }
 

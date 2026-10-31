@@ -632,7 +632,6 @@ function planAccountWhereByDateBasis(
   } else if (dateBasis === 'emissao_nf') {
     const range = monthUtcRange(year, month);
     dateWhere = {
-      active: true,
       OR: [
         {
           temNotaFiscal: true,
@@ -640,9 +639,15 @@ function planAccountWhereByDateBasis(
             gte: range.start,
             lt: range.end,
           },
+          OR: [
+            { fiscalBudgetEligible: true },
+            { fiscalBudgetEligible: null, active: true },
+          ],
         },
         {
           temNotaFiscal: false,
+          active: true,
+          fiscalBudgetEligible: null,
           dataLancamento: {
             gte: range.start,
             lt: range.end,
