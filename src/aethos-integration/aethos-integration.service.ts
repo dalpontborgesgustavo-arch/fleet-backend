@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -881,6 +882,126 @@ function hashCanonicalValue(value: unknown) {
 const PLAN_ACCOUNT_REPARCELMENT_ORIGIN = 'VW_LST_CONTAS_PAGAR';
 const PLAN_ACCOUNT_REPARCELMENT_RULE = 'RECEBERPAGAR_REPAR_DOC_ORIG_TITULO_PAI';
 const MAX_REPARCELMENT_RECONCILIATION_IDS = 20_000;
+const MAX_FISCAL_ELIGIBILITY_BATCH_SIZE = 100;
+const FISCAL_ELIGIBILITY_SELECT = {
+  id: true,
+  origem: true,
+  idLancamento: true,
+  codigoEmpresa: true,
+  codigoPlanoConta: true,
+  valorCusto: true,
+  active: true,
+  status: true,
+  temNotaFiscal: true,
+  idNotaFiscal: true,
+  numeroNotaFiscal: true,
+  dataEmissaoNotaFiscal: true,
+  dataLancamento: true,
+  fiscalBudgetEligible: true,
+  deactivationReason: true,
+  reconciliationId: true,
+  syncedAt: true,
+  updatedAt: true,
+} as const;
+
+type FiscalEligibilityRow = Prisma.AethosPlanoContaCostGetPayload<{
+  select: typeof FISCAL_ELIGIBILITY_SELECT;
+}>;
+
+function fiscalEligibilityPreimageHash(row: FiscalEligibilityRow) {
+  return hashCanonicalValue({
+    id: row.id,
+    origem: row.origem,
+    idLancamento: row.idLancamento,
+    codigoEmpresa: row.codigoEmpresa,
+    codigoPlanoConta: row.codigoPlanoConta,
+    valorCusto: row.valorCusto.toFixed(2),
+    active: row.active,
+    status: row.status,
+    temNotaFiscal: row.temNotaFiscal,
+    idNotaFiscal: row.idNotaFiscal,
+    numeroNotaFiscal: row.numeroNotaFiscal,
+    dataEmissaoNotaFiscal: row.dataEmissaoNotaFiscal?.toISOString() ?? null,
+    dataLancamento: row.dataLancamento?.toISOString() ?? null,
+    fiscalBudgetEligible: row.fiscalBudgetEligible,
+    deactivationReason: row.deactivationReason,
+    reconciliationId: row.reconciliationId,
+    syncedAt: row.syncedAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  });
+}
+
+function normalizeFiscalEligibilityIds(body: unknown) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new BadRequestException('Consulta fiscal invalida');
+  }
+  const ids = (body as AnyRow).idLancamentos;
+  if (
+    !Array.isArray(ids) ||
+    !ids.length ||
+    ids.length > MAX_FISCAL_ELIGIBILITY_BATCH_SIZE
+  ) {
+    throw new BadRequestException('Informe de 1 a 100 IDs de lancamento');
+  }
+  const normalized = ids.map((id) => normalizeText(id));
+  if (
+    normalized.some((id) => !id) ||
+    new Set(normalized).size !== normalized.length
+  ) {
+    throw new BadRequestException('IDs de lancamento vazios ou repetidos');
+  }
+  return normalized;
+}
+
+function normalizeFiscalEligibilityBatch(body: unknown) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new BadRequestException('Lote fiscal invalido');
+  }
+  const payload = body as AnyRow;
+  const runId = normalizeText(payload.runId);
+  if (!runId || runId.length > 160 || !/^[A-Za-z0-9._:-]+$/.test(runId)) {
+    throw new BadRequestException('runId fiscal invalido');
+  }
+  if (
+    !Array.isArray(payload.updates) ||
+    !payload.updates.length ||
+    payload.updates.length > MAX_FISCAL_ELIGIBILITY_BATCH_SIZE
+  ) {
+    throw new BadRequestException('Informe de 1 a 100 atualizacoes fiscais');
+  }
+  const updates = payload.updates.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new BadRequestException('Atualizacao fiscal invalida');
+    }
+    const row = value as AnyRow;
+    const idLancamento = normalizeText(row.idLancamento);
+    const preimageHash = normalizeText(row.preimageHash).toLowerCase();
+    if (!idLancamento || !/^[a-f0-9]{64}$/.test(preimageHash)) {
+      throw new BadRequestException('ID ou preimagem fiscal invalida');
+    }
+    if (typeof row.fiscalBudgetEligible !== 'boolean') {
+      throw new BadRequestException('Classificacao fiscal deve ser booleana');
+    }
+    return {
+      idLancamento,
+      preimageHash,
+      fiscalBudgetEligible: row.fiscalBudgetEligible,
+    };
+  });
+  if (new Set(updates.map((row) => row.idLancamento)).size !== updates.length) {
+    throw new BadRequestException('IDs de lancamento repetidos no lote');
+  }
+  updates.sort((a, b) => a.idLancamento.localeCompare(b.idLancamento, 'en'));
+  return {
+    runId,
+    execute: payload.execute === true,
+    updates,
+    payloadHash: hashCanonicalValue({
+      origin: PLAN_ACCOUNT_REPARCELMENT_ORIGIN,
+      updates,
+    }),
+  };
+}
 
 function normalizePlanAccountReparcelmentReconciliation(body: unknown) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -1918,6 +2039,210 @@ export class AethosIntegrationService {
       upserted: custos.length,
       skipped: Math.max(0, rawRows.length - custos.length),
     };
+  }
+
+  async readFiscalBudgetEligibility(body: unknown) {
+    const ids = normalizeFiscalEligibilityIds(body);
+    const rows = await this.prisma.aethosPlanoContaCost.findMany({
+      where: {
+        origem: PLAN_ACCOUNT_REPARCELMENT_ORIGIN,
+        idLancamento: { in: ids },
+      },
+      select: FISCAL_ELIGIBILITY_SELECT,
+    });
+    const byId = new Map(rows.map((row) => [row.idLancamento, row]));
+
+    return {
+      ok: true,
+      origin: PLAN_ACCOUNT_REPARCELMENT_ORIGIN,
+      requestedCount: ids.length,
+      foundCount: rows.length,
+      missingIds: ids.filter((id) => !byId.has(id)),
+      rows: ids.flatMap((id) => {
+        const row = byId.get(id);
+        if (!row) return [];
+        return [
+          {
+            idLancamento: row.idLancamento,
+            codigoEmpresa: row.codigoEmpresa,
+            codigoPlanoConta: row.codigoPlanoConta,
+            valorCusto: row.valorCusto.toFixed(2),
+            active: row.active,
+            status: row.status,
+            temNotaFiscal: row.temNotaFiscal,
+            idNotaFiscal: row.idNotaFiscal,
+            numeroNotaFiscal: row.numeroNotaFiscal,
+            dataEmissaoNotaFiscal:
+              row.dataEmissaoNotaFiscal?.toISOString() ?? null,
+            dataLancamento: row.dataLancamento?.toISOString() ?? null,
+            fiscalBudgetEligible: row.fiscalBudgetEligible,
+            deactivationReason: row.deactivationReason,
+            reconciliationId: row.reconciliationId,
+            syncedAt: row.syncedAt.toISOString(),
+            preimageHash: fiscalEligibilityPreimageHash(row),
+          },
+        ];
+      }),
+    };
+  }
+
+  async reconcileFiscalBudgetEligibility(body: unknown) {
+    const batch = normalizeFiscalEligibilityBatch(body);
+    const responseFromAudit = (audit: {
+      runId: string;
+      requestedCount: number;
+      changedCount: number;
+      alreadyCount: number;
+      executedAt: Date;
+    }) => ({
+      ok: true,
+      executed: true,
+      replayed: true,
+      runId: audit.runId,
+      requestedCount: audit.requestedCount,
+      changedCount: audit.changedCount,
+      alreadyCount: audit.alreadyCount,
+      executedAt: audit.executedAt.toISOString(),
+    });
+    const verifyPrevious = (audit: {
+      payloadHash: string;
+      runId: string;
+      requestedCount: number;
+      changedCount: number;
+      alreadyCount: number;
+      executedAt: Date;
+    }) => {
+      if (audit.payloadHash !== batch.payloadHash) {
+        throw new BadRequestException('runId fiscal ja usado com outro lote');
+      }
+      return responseFromAudit(audit);
+    };
+
+    const previous =
+      await this.prisma.aethosFiscalBudgetEligibilityBatch.findUnique({
+        where: { runId: batch.runId },
+      });
+    if (previous) return verifyPrevious(previous);
+
+    const inspect = async (
+      client: Pick<PrismaService, 'aethosPlanoContaCost'>,
+    ) => {
+      const rows = await client.aethosPlanoContaCost.findMany({
+        where: {
+          origem: PLAN_ACCOUNT_REPARCELMENT_ORIGIN,
+          idLancamento: {
+            in: batch.updates.map((update) => update.idLancamento),
+          },
+        },
+        select: FISCAL_ELIGIBILITY_SELECT,
+      });
+      const byId = new Map(rows.map((row) => [row.idLancamento, row]));
+      const rejected: Array<{ idLancamento: string; reason: string }> = [];
+      let wouldChangeCount = 0;
+      let alreadyCount = 0;
+
+      for (const update of batch.updates) {
+        const row = byId.get(update.idLancamento);
+        let reason: string | null = null;
+        if (!row) reason = 'not_found';
+        else if (fiscalEligibilityPreimageHash(row) !== update.preimageHash)
+          reason = 'stale_preimage';
+        else if (
+          row.deactivationReason &&
+          row.deactivationReason !== PLAN_ACCOUNT_REPARCELMENT_RULE
+        )
+          reason = 'manual_or_unknown_exclusion';
+        else if (
+          update.fiscalBudgetEligible &&
+          (!row.temNotaFiscal ||
+            !row.idNotaFiscal ||
+            !row.dataEmissaoNotaFiscal)
+        )
+          reason = 'invoice_not_proven';
+
+        if (reason)
+          rejected.push({ idLancamento: update.idLancamento, reason });
+        else if (row!.fiscalBudgetEligible === update.fiscalBudgetEligible)
+          alreadyCount++;
+        else wouldChangeCount++;
+      }
+
+      return { rows: byId, rejected, wouldChangeCount, alreadyCount };
+    };
+
+    if (!batch.execute) {
+      const checked = await inspect(this.prisma);
+      return {
+        ok: checked.rejected.length === 0,
+        executed: false,
+        runId: batch.runId,
+        requestedCount: batch.updates.length,
+        wouldChangeCount: checked.wouldChangeCount,
+        alreadyCount: checked.alreadyCount,
+        rejected: checked.rejected,
+      };
+    }
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const concurrentAudit =
+          await tx.aethosFiscalBudgetEligibilityBatch.findUnique({
+            where: { runId: batch.runId },
+          });
+        if (concurrentAudit) return verifyPrevious(concurrentAudit);
+
+        const checked = await inspect(tx as never);
+        if (checked.rejected.length) {
+          throw new ConflictException({
+            message: 'Lote fiscal rejeitado; nenhuma linha alterada',
+            rejected: checked.rejected,
+          });
+        }
+
+        for (const update of batch.updates) {
+          const row = checked.rows.get(update.idLancamento)!;
+          if (row.fiscalBudgetEligible === update.fiscalBudgetEligible)
+            continue;
+          const result = await tx.aethosPlanoContaCost.updateMany({
+            where: {
+              id: row.id,
+              syncedAt: row.syncedAt,
+              updatedAt: row.updatedAt,
+              fiscalBudgetEligible: row.fiscalBudgetEligible,
+              deactivationReason: row.deactivationReason,
+              reconciliationId: row.reconciliationId,
+            },
+            data: { fiscalBudgetEligible: update.fiscalBudgetEligible },
+          });
+          if (result.count !== 1) {
+            throw new ConflictException(
+              'Lote fiscal mudou durante a gravacao; nenhuma linha alterada',
+            );
+          }
+        }
+
+        const audit = await tx.aethosFiscalBudgetEligibilityBatch.create({
+          data: {
+            runId: batch.runId,
+            payloadHash: batch.payloadHash,
+            origin: PLAN_ACCOUNT_REPARCELMENT_ORIGIN,
+            requestedCount: batch.updates.length,
+            changedCount: checked.wouldChangeCount,
+            alreadyCount: checked.alreadyCount,
+            updates: batch.updates.map((update) => ({
+              idLancamento: update.idLancamento,
+              previousFiscalBudgetEligible: checked.rows.get(
+                update.idLancamento,
+              )!.fiscalBudgetEligible,
+              fiscalBudgetEligible: update.fiscalBudgetEligible,
+              preimageHash: update.preimageHash,
+            })) as Prisma.InputJsonValue,
+          },
+        });
+        return { ...responseFromAudit(audit), replayed: false };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
   }
 
   async reconcilePlanAccountCostReparcelments(body: unknown) {

@@ -457,6 +457,20 @@ model AethosPlanoContaCostReconciliation {
   @@index([executedAt])
 }
 
+model AethosFiscalBudgetEligibilityBatch {
+  id             String   @id @default(uuid())
+  runId          String   @unique
+  payloadHash    String
+  origin         String
+  requestedCount Int
+  changedCount   Int
+  alreadyCount   Int
+  updates        Json
+  executedAt     DateTime @default(now())
+
+  @@index([executedAt])
+}
+
 model AethosContract {
   id                        String                     @id @default(uuid())
   aethosId                  String                     @unique
