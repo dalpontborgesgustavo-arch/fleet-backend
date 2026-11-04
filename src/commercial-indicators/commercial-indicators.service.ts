@@ -306,6 +306,13 @@ export class CommercialIndicatorsService {
     }
   }
 
+  private ensureWriteAccess(role?: string | null) {
+    this.ensureAccess(role);
+    if (normalizeRole(role) === 'ceo') {
+      throw new ForbiddenException('Perfil CEO pode consultar, mas não alterar indicadores comerciais');
+    }
+  }
+
   private opportunityData(data: any) {
     const status = text(data?.status);
     if (status && !OPPORTUNITY_STATUSES.has(status)) {
@@ -348,7 +355,7 @@ export class CommercialIndicatorsService {
   }
 
   async createOpportunity(data: any, role?: string | null, actorId?: string) {
-    this.ensureAccess(role);
+    this.ensureWriteAccess(role);
     const created = await this.prisma.$transaction(async (tx) => {
       const row = await tx.commercialOpportunity.create({
         data: {
@@ -379,7 +386,7 @@ export class CommercialIndicatorsService {
     role?: string | null,
     actorId?: string,
   ) {
-    this.ensureAccess(role);
+    this.ensureWriteAccess(role);
     const existing = await this.prisma.commercialOpportunity.findFirst({
       where: { id, active: true },
     });
@@ -408,7 +415,7 @@ export class CommercialIndicatorsService {
   }
 
   async removeOpportunity(id: string, role?: string | null, actorId?: string) {
-    this.ensureAccess(role);
+    this.ensureWriteAccess(role);
     const existing = await this.prisma.commercialOpportunity.findFirst({
       where: { id, active: true },
     });
@@ -444,7 +451,7 @@ export class CommercialIndicatorsService {
   }
 
   async createProcess(data: any, role?: string | null, actorId?: string) {
-    this.ensureAccess(role);
+    this.ensureWriteAccess(role);
     const created = await this.prisma.$transaction(async (tx) => {
       const row = await tx.commercialProcessRecord.create({
         data: {
@@ -475,7 +482,7 @@ export class CommercialIndicatorsService {
     role?: string | null,
     actorId?: string,
   ) {
-    this.ensureAccess(role);
+    this.ensureWriteAccess(role);
     const existing = await this.prisma.commercialProcessRecord.findFirst({
       where: { id, active: true },
     });
@@ -502,7 +509,7 @@ export class CommercialIndicatorsService {
   }
 
   async removeProcess(id: string, role?: string | null, actorId?: string) {
-    this.ensureAccess(role);
+    this.ensureWriteAccess(role);
     const existing = await this.prisma.commercialProcessRecord.findFirst({
       where: { id, active: true },
     });
