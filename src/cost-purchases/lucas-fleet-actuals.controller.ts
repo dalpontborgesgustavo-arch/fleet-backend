@@ -22,6 +22,36 @@ const READ_ROLES = new Set([
   'gestor',
   'ceo',
 ]);
+const LABOR_COST_ROLES = new Set(['admin', 'administrador', 'ceo']);
+
+export function canReadFleetLaborCost(user: { role?: string; sub?: string }) {
+  if (LABOR_COST_ROLES.has(String(user.role || '').trim().toLowerCase())) return true;
+  const explicitIds = String(process.env.LUCAS_FLEET_LABOR_VIEWER_USER_IDS || '')
+    .split(',').map((id) => id.trim()).filter(Boolean);
+  return Boolean(user.sub && explicitIds.includes(String(user.sub)));
+}
+
+// Group totals for one or two workers disclose individual payroll by inference.
+// This endpoint deliberately has no overall labor total from which a suppressed
+// group's value could be reconstructed by subtraction.
+export function suppressSmallLaborGroups<T extends {
+  laborActual: string | null;
+  valuedEmployeeCount: number;
+  costStatus: string;
+}>(groups: T[], canReadCost = false) {
+  return groups.map((group) => {
+    if (!canReadCost && group.laborActual !== null) {
+      return { ...group, laborActual: null, costStatus: 'ACCESS_RESTRICTED',
+        privacySuppressed: true };
+    }
+    const privacySuppressed = group.laborActual !== null &&
+      group.valuedEmployeeCount < 3;
+    return privacySuppressed
+      ? { ...group, laborActual: null, costStatus: 'PRIVACY_SUPPRESSED',
+        privacySuppressed: true }
+      : { ...group, privacySuppressed: false };
+  });
+}
 
 @UseGuards(JwtGuard)
 @Controller('lucas-fleet-results/actuals')
@@ -106,7 +136,7 @@ export class LucasFleetActualsController {
       revenue.coverage
         ? 'Faturamento realizado usa a fonte Receita Total do Power BI Frota, publicada por snapshot finalizado e reconciliado.'
         : 'Faturamento realizado fica null enquanto nao houver snapshot finalizado e reconciliado cobrindo a competencia.',
-      'Mao de obra realizada usa os colaboradores TOTVS vinculados no checklist mensal; grupos sem vinculo completo ou custo conhecido permanecem null.',
+      'Mao de obra realizada soma apenas custos TOTVS conhecidos dos vinculos validos. Quando faltam vinculos ou custos, o subtotal aparece como parcial; sem nenhum custo conhecido, fica indisponivel. Custos TOTVS nao conciliados sao provisórios.',
     ];
     const mappedAethosIds = new Set(
       mappedVehicles.map((vehicle) => String(vehicle.aethosVehicleId)),
@@ -119,11 +149,13 @@ export class LucasFleetActualsController {
         `${unmappedRevenue.length} veiculo(s) com faturamento no Aethos ainda nao possuem vinculo com o cadastro JR; esses valores nao entram nos grupos da previa.`,
       );
     }
+    const publicLaborGroups = suppressSmallLaborGroups(labor.groupLaborActuals,
+      canReadFleetLaborCost(req.user || {}));
     if (expenses.length === 0 && fuel.length === 0 && !revenue.coverage) {
       return {
         competence,
         rows: [],
-        groupLaborActuals: labor.groupLaborActuals,
+        groupLaborActuals: publicLaborGroups,
         source: 'COST_PURCHASES_AND_FLEET_REVENUE_PBI',
         coverage: { revenue: revenue.coverage, labor: labor.coverage },
         limitations,
@@ -191,7 +223,7 @@ export class LucasFleetActualsController {
     return {
       competence,
       rows,
-      groupLaborActuals: labor.groupLaborActuals,
+      groupLaborActuals: publicLaborGroups,
       source: 'COST_PURCHASES_AND_FLEET_REVENUE_PBI',
       coverage: { revenue: revenue.coverage, labor: labor.coverage },
       limitations,

@@ -1166,6 +1166,7 @@ model Vehicle {
   assignmentHistory             VehicleAssignmentHistory[]
   aethosStatusHistory           AethosVehicleStatusEvent[]
   costPurchaseProfiles          CostPurchaseVehicleProfile[]
+  fleetResultMonthlyWorkforce   FleetResultMonthlyWorkforce[]
   monthlyChecklistResponsible   User?                        @relation("VehicleMonthlyChecklistResponsible", fields: [monthlyChecklistResponsibleId], references: [id], onDelete: SetNull)
 
   @@index([filial])
@@ -1204,6 +1205,35 @@ model FleetResultMonthlySettingAudit {
   setting    FleetResultMonthlySetting @relation(fields: [settingId], references: [id], onDelete: Restrict)
 
   @@index([settingId, createdAt])
+}
+
+model FleetResultMonthlyWorkforce {
+  id          String   @id @default(uuid())
+  competence  DateTime @db.Date
+  vehicleId   String
+  assignments Json
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  audit       FleetResultMonthlyWorkforceAudit[]
+
+  @@unique([competence, vehicleId])
+  @@index([competence])
+}
+
+model FleetResultMonthlyWorkforceAudit {
+  id          BigInt   @id @default(autoincrement())
+  workforceId String
+  action      String
+  actorId     String?
+  beforeData  Json?
+  afterData   Json
+  createdAt   DateTime @default(now())
+  workforce   FleetResultMonthlyWorkforce @relation(fields: [workforceId], references: [id], onDelete: Restrict)
+
+  @@index([workforceId, createdAt])
 }
 
 model CostPurchaseVehicleProfile {
@@ -3042,6 +3072,82 @@ model TotvsEmployeeCostAggregate {
   @@index([companyId, unitId, competence, isCurrent, active], map: "TotvsEmployeeCostAggregate_current_idx")
   @@index([employeeKey, competence, period])
   @@index([syncRunId])
+}
+
+// Staged, unallocated labor cost for Resultados Frota only. The existing
+// IND.BI.0025 employee snapshot and cost aggregate remain independent.
+model TotvsFleetLaborSyncRun {
+  id             String                    @id @default(uuid())
+  companyId      String
+  unitId         String
+  queryCode      String
+  ruleVersion    String
+  status         String
+  requestedById  String?
+  startedAt      DateTime                  @default(now()) @db.Timestamptz(6)
+  finishedAt     DateTime?                 @db.Timestamptz(6)
+  receivedRows   Int                       @default(0)
+  acceptedRows   Int                       @default(0)
+  rejectedRows   Int                       @default(0)
+  duplicateKeys  Int                       @default(0)
+  responseBytes  Int                       @default(0)
+  sourceHash     String?
+  errorCode      String?
+  errorDetail    String?
+  rows           TotvsFleetLaborCost[]
+  approvals      TotvsFleetLaborApproval[]
+
+  @@index([companyId, unitId, startedAt])
+  @@index([queryCode, status, startedAt])
+}
+
+model TotvsFleetLaborApproval {
+  id            String                  @id @default(uuid())
+  companyId     String
+  unitId        String
+  competence    DateTime                @db.Date
+  syncRunId     String
+  sourceHash    String
+  rowCount      Int
+  totalCost     Decimal                 @db.Decimal(28, 6)
+  evidenceRef   String
+  approvedById  String?
+  approvedAt    DateTime                @default(now()) @db.Timestamptz(6)
+  syncRun       TotvsFleetLaborSyncRun  @relation(fields: [syncRunId], references: [id], onDelete: Restrict)
+  rows          TotvsFleetLaborCost[]
+
+  @@unique([companyId, unitId, competence, syncRunId])
+  @@index([companyId, unitId, competence, approvedAt])
+}
+
+model TotvsFleetLaborCost {
+  id                   String                    @id @default(uuid())
+  companyId            String
+  unitId               String
+  queryCode            String
+  ruleVersion          String
+  companyCode          String
+  employeeNumber       String
+  employeeKey          String
+  competence           DateTime                  @db.Date
+  period               Int
+  totalGeneralIntegral Decimal                   @db.Decimal(28, 6)
+  cardinalityOk        Boolean
+  contentHash          String
+  isCurrent            Boolean                   @default(false)
+  active               Boolean                   @default(true)
+  syncRunId            String
+  approvalId           String?
+  createdAt            DateTime                  @default(now()) @db.Timestamptz(6)
+  updatedAt            DateTime                  @updatedAt @db.Timestamptz(6)
+  syncRun              TotvsFleetLaborSyncRun    @relation(fields: [syncRunId], references: [id], onDelete: Restrict)
+  approval             TotvsFleetLaborApproval? @relation(fields: [approvalId], references: [id], onDelete: Restrict)
+
+  @@unique([companyId, unitId, employeeKey, competence, period, syncRunId])
+  @@index([companyId, unitId, competence, isCurrent, active])
+  @@index([employeeKey, competence, period])
+  @@index([syncRunId])
+  @@index([approvalId])
 }
 
 model UsinaAsphaltFleetOperatorAssignment {

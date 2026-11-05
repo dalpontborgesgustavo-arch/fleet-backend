@@ -1,0 +1,42 @@
+# Fonte dedicada de mão de obra — Resultados Frota
+
+Esta implementação é isolada da consulta compartilhada `IND.BI.0025` e das
+tabelas atuais de funcionários da TOTVS. A fórmula de custo foi definida pelo
+Gustavo como oficial; a liberação da nova fonte ainda depende de prova técnica
+de identidade, cardinalidade e paridade numérica com a consulta viva.
+
+## Portas de segurança
+
+1. Instalar e testar a consulta dedicada `IND.BI.0038` no TOTVS sem alterar a
+   `IND.BI.0025`. A consulta deve entregar exatamente as oito colunas aceitas
+   pelo normalizador, somente as duas últimas competências de calendário já
+   encerradas. Não enviar mês corrente. Histórico antigo é tratado em lotes
+   limitados, não por uma consulta completa automática.
+2. Aplicar a migration em ambiente controlado, com backup e plano de reversão.
+   Não executar a partir de checkout sujo ou diretamente neste worktree.
+3. Configurar `TOTVS_RM_FLEET_LABOR_QUERY_CODE=IND.BI.0038`. A consulta é
+   lida por demanda e apenas estagiada; não substitui a fonte atual.
+4. Confrontar `IND.BI.0038` com a `IND.BI.0025` viva por competência:
+   funcionário/coligada/período, contagem de linhas, total exato e fórmula.
+   Guardar recibo da comparação independente; o `evidenceRef` da API apenas
+   registra sua referência e **não verifica a prova por si só**.
+5. Somente após esse aceite técnico, habilitar temporariamente
+   `TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED=true` e aprovar cada competência
+   com hash, contagem, total e referência da evidência. Confirmar pelo endpoint
+   de readback e pela tela. Depois desabilitar a ativação manual, se desejado.
+6. Para estágio diário, `TOTVS_RM_FLEET_LABOR_AUTO_STAGE=true` liga o cron
+   às 04:30 de São Paulo, após a consulta compartilhada das 04:00. Ele nunca
+   ativa competência automaticamente. Deixar desligado até comprovar carga,
+   recorrência e execução natural da consulta 0038.
+
+O leitor da frota usa a fonte dedicada somente para competência aprovada e
+íntegra. Caso exista aprovação mas os dados percam integridade, falha fechado
+sem recorrer aos números provisórios da 0025. Sem aprovação, mantém o legado
+provisório. Não mistura fontes no mesmo mês.
+
+O endpoint de Resultados Frota expõe valor de mão de obra apenas a CEO/admin ou
+usuários explicitamente autorizados por ID em
+`LUCAS_FLEET_LABOR_VIEWER_USER_IDS`. Mesmo nesse público, grupos com menos de
+três funcionários distintos efetivamente valorizados têm o valor suprimido.
+Não há total geral de mão de obra neste endpoint para reconstruir o grupo por
+subtração. O ID explícito de Lucas precisa ser conferido antes de configurar.

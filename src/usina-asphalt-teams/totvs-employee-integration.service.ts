@@ -132,7 +132,7 @@ export class TotvsEmployeeIntegrationService {
       schedule: DAILY_SYNC_CRON,
       timeZone: DAILY_SYNC_TIME_ZONE,
       formulaEnabled: true,
-      costRule: 'TOTAL_GERAL_LINHA_PERIODOS_20_30_40_SEM_PFRATEIOFIXO',
+      costRule: 'TOTAL_GERAL_LINHA_PERIODOS_20_30_40_COM_PFRATEIOFIXO_NAO_CONCILIADO',
       lastRun,
     };
   }
