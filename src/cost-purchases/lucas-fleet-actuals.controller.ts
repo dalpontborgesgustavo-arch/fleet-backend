@@ -12,6 +12,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CostPurchasesService } from './cost-purchases.service';
 import { LucasFleetRevenueSyncService } from '../aethos-integration/lucas-fleet-revenue-sync.service';
 import { getLucasFleetGroupLaborActuals } from './lucas-fleet-labor-actuals';
+import { calculateMonthlyKm } from './lucas-fleet-monthly-km';
 
 const READ_ROLES = new Set([
   'admin',
@@ -79,6 +80,7 @@ export class LucasFleetActualsController {
         },
         select: {
           aethosVehicleId: true,
+          documentDate: true,
           initialKm: true,
           currentKm: true,
         },
@@ -97,7 +99,7 @@ export class LucasFleetActualsController {
     ]);
     const limitations = [
       'Custos e abastecimentos seguem a elegibilidade do relatorio mensal; o faturamento usa o vinculo do veiculo local com o Aethos.',
-      'KM deriva de leituras positivas de odometro em abastecimentos; sem leitura valida, o valor e null.',
+      'KM usa a diferenca entre a primeira e a ultima leitura valida de hodometro no mes; sem leituras suficientes ou consistentes, o valor fica indisponivel.',
       'Horas trabalhadas somam somente intervalos validos de horimetro aceitos pelo relatorio Custos Compras; sem leitura valida, o valor e null.',
       'fuelTotal soma todos os combustiveis dos abastecimentos; dieselActual soma somente fatos da conta 37 e fica null sem fatos dessa conta.',
       'maintenance segue o relatorio Custos Compras: despesas do veiculo menos abastecimentos.',
@@ -148,14 +150,11 @@ export class LucasFleetActualsController {
           [String(row.aethosVehicleId), Number(row.revenueActual)] as const,
       ),
     );
-    const kmByVehicle = new Map<number, number>();
-    for (const fact of odometerFacts) {
-      if (fact.initialKm === null || fact.currentKm === null) continue;
-      const delta = Number(fact.currentKm) - Number(fact.initialKm);
-      if (!Number.isFinite(delta) || delta <= 0) continue;
-      kmByVehicle.set(
-        fact.aethosVehicleId,
-        (kmByVehicle.get(fact.aethosVehicleId) ?? 0) + delta,
+    const { kmByVehicle, inconsistentVehicles } =
+      calculateMonthlyKm(odometerFacts);
+    if (inconsistentVehicles) {
+      limitations.push(
+        `${inconsistentVehicles} veiculo(s) com leituras de hodometro contraditorias ficaram sem KM ate revisao da origem.`,
       );
     }
     const rows = result.rows.map((row) => ({
