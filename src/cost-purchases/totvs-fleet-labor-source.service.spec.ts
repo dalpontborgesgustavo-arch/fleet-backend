@@ -74,7 +74,7 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
       password: process.env.TOTVS_RM_PASSWORD,
     };
     const oldFetch = global.fetch;
-    process.env.TOTVS_RM_FLEET_LABOR_QUERY_CODE = 'IND.BI.0038';
+    process.env.TOTVS_RM_FLEET_LABOR_QUERY_CODE = 'IND.BI.0039';
     process.env.TOTVS_RM_BASE_URL = 'https://totvs.example';
     process.env.TOTVS_RM_USERNAME = 'test';
     process.env.TOTVS_RM_PASSWORD = 'test';
@@ -128,7 +128,7 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
       totvsFleetLaborSyncRun: { findUnique: jest.fn().mockResolvedValue({
         id: 'run-1', status: 'STAGED', companyId: 'JR_CONSTRUCOES',
         unitId: 'USINA_ASFALTO_ICARA', sourceHash: 'a'.repeat(64),
-        queryCode: 'IND.BI.0038', ruleVersion: 'IND.BI.0025_INTEGRAL_V1',
+        queryCode: 'IND.BI.0039', ruleVersion: 'IND.BI.0025_INTEGRAL_V1',
       }) },
       totvsFleetLaborCost: {
         findMany: jest.fn().mockResolvedValue([{ id: rowId,
@@ -172,7 +172,7 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
       totvsFleetLaborSyncRun: { findUnique: jest.fn().mockResolvedValue({
         id: 'old-run', status: 'STAGED', companyId: 'JR_CONSTRUCOES',
         unitId: 'USINA_ASFALTO_ICARA', sourceHash: 'b'.repeat(64),
-        queryCode: 'IND.BI.0038', ruleVersion: 'IND.BI.0025_INTEGRAL_V1',
+        queryCode: 'IND.BI.0039', ruleVersion: 'IND.BI.0025_INTEGRAL_V1',
       }) },
       totvsFleetLaborCost: {
         findMany: jest.fn().mockResolvedValue([{ id: 'row-old',
@@ -219,7 +219,7 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
         id: 'approval-1', sourceHash: 'c'.repeat(64), rowCount: 1,
         totalCost: new Prisma.Decimal('100.00'),
         evidenceRef: 'parity-report-2026-09-reviewed', approvedAt: new Date(),
-        syncRun: { queryCode: 'IND.BI.0038', status: 'STAGED',
+        syncRun: { queryCode: 'IND.BI.0039', status: 'STAGED',
           sourceHash: 'c'.repeat(64), ruleVersion: 'IND.BI.0025_INTEGRAL_V1' },
       }) },
       totvsFleetLaborCost: {

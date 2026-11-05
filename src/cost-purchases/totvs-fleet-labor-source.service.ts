@@ -14,7 +14,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { USINA_ASPHALT_TEAM_CONTEXT } from '../usina-asphalt-teams/usina-asphalt-teams.rules';
 
 export const FLEET_LABOR_FORMULA_ID = 'IND.BI.0025_INTEGRAL_V1';
-export const FLEET_LABOR_QUERY_CODE = 'IND.BI.0038';
+export const FLEET_LABOR_QUERY_CODE = 'IND.BI.0039';
 const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const MAX_ROWS = 50_000;
 const TIMEOUT_MS = 20_000;

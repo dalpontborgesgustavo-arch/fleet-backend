@@ -227,7 +227,7 @@ describe('mao de obra da frota com ultimo vinculo mensal', () => {
     prisma.checklist.findMany.mockResolvedValueOnce([current('1-1')]);
     prisma.totvsFleetLaborApproval.findFirst.mockResolvedValueOnce({
       id: 'approval-1', rowCount: 1, sourceHash: 'hash', totalCost: '123.45',
-      syncRun: { status: 'STAGED', sourceHash: 'hash', queryCode: 'IND.BI.0038',
+      syncRun: { status: 'STAGED', sourceHash: 'hash', queryCode: 'IND.BI.0039',
         ruleVersion: 'IND.BI.0025_INTEGRAL_V1' },
     });
     prisma.totvsFleetLaborCost.count.mockResolvedValue(1);
@@ -250,7 +250,7 @@ describe('mao de obra da frota com ultimo vinculo mensal', () => {
     prisma.checklist.findMany.mockResolvedValueOnce([current('1-1')]);
     prisma.totvsFleetLaborApproval.findFirst.mockResolvedValueOnce({
       id: 'approval-1', rowCount: 2, sourceHash: 'hash', totalCost: '123.45',
-      syncRun: { status: 'STAGED', sourceHash: 'hash', queryCode: 'IND.BI.0038',
+      syncRun: { status: 'STAGED', sourceHash: 'hash', queryCode: 'IND.BI.0039',
         ruleVersion: 'IND.BI.0025_INTEGRAL_V1' },
     });
     prisma.totvsFleetLaborCost.count.mockResolvedValue(1);
