@@ -61,6 +61,7 @@ describe('AuthService', () => {
       role: 'SUPERVISOR_APOIO',
       tipoFrota: null,
       filial: 'NORTE',
+      canAccessSsmaLicenses: true,
       mustChangePassword: false,
     });
     prisma.refreshToken.create.mockResolvedValue({ id: 'refresh-1' });
@@ -76,6 +77,7 @@ describe('AuthService', () => {
         role: 'supervisor_apoio',
         tipoFrota: null,
         filial: 'NORTE',
+        canAccessSsmaLicenses: true,
       }),
     );
     expect(response.user).toEqual(
@@ -83,6 +85,7 @@ describe('AuthService', () => {
         role: 'supervisor_apoio',
         tipoFrota: null,
         filial: 'NORTE',
+        canAccessSsmaLicenses: true,
       }),
     );
   });

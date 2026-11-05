@@ -190,6 +190,10 @@ export class UsersController {
           role === 'topografia' && data.canAccessTopographyInventory === true,
         canManageProductionControl:
           actorRole === 'admin' && data.canManageProductionControl === true,
+        canAccessSsmaLicenses:
+          actorRole === 'admin' &&
+          role === 'supervisor_apoio' &&
+          data.canAccessSsmaLicenses === true,
         ...fleetAccess,
       },
     });
@@ -259,6 +263,12 @@ export class UsersController {
         actorRole === 'admin' && data.canManageProductionControl !== undefined
           ? data.canManageProductionControl === true
           : existing.canManageProductionControl,
+      canAccessSsmaLicenses:
+        nextRole === 'supervisor_apoio'
+          ? actorRole === 'admin' && data.canAccessSsmaLicenses !== undefined
+            ? data.canAccessSsmaLicenses === true
+            : existing.canAccessSsmaLicenses
+          : false,
       ...fleetAccess,
     };
 

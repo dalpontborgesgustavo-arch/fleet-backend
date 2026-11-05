@@ -86,6 +86,7 @@ export class AuthService {
       canAccessFleetVideo: user.canAccessFleetVideo,
       canAccessBucketActivations: user.canAccessBucketActivations,
       canManageProductionControl: user.canManageProductionControl,
+      canAccessSsmaLicenses: user.canAccessSsmaLicenses,
       mustChangePassword: user.mustChangePassword,
     });
   }
@@ -147,6 +148,7 @@ export class AuthService {
         canAccessFleetVideo: storedToken.user.canAccessFleetVideo,
         canAccessBucketActivations: storedToken.user.canAccessBucketActivations,
         canManageProductionControl: storedToken.user.canManageProductionControl,
+        canAccessSsmaLicenses: storedToken.user.canAccessSsmaLicenses,
         mustChangePassword: storedToken.user.mustChangePassword,
       },
       normalizedToken,
@@ -190,6 +192,7 @@ export class AuthService {
       canAccessFleetVideo?: boolean | null;
       canAccessBucketActivations?: boolean | null;
       canManageProductionControl?: boolean | null;
+      canAccessSsmaLicenses?: boolean | null;
       mustChangePassword?: boolean | null;
     },
     existingRefreshToken?: string,
@@ -217,6 +220,7 @@ export class AuthService {
       canAccessFleetVideo: user.canAccessFleetVideo,
       canAccessBucketActivations: user.canAccessBucketActivations,
       canManageProductionControl: user.canManageProductionControl,
+      canAccessSsmaLicenses: user.canAccessSsmaLicenses,
       mustChangePassword: user.mustChangePassword,
       canAccessMonthlyChecklist: monthlyChecklistAccess,
     });
@@ -310,6 +314,7 @@ export class AuthService {
     canAccessFleetVideo?: boolean | null;
     canAccessBucketActivations?: boolean | null;
     canManageProductionControl?: boolean | null;
+    canAccessSsmaLicenses?: boolean | null;
     mustChangePassword?: boolean | null;
     canAccessMonthlyChecklist?: boolean | null;
   }) {
@@ -328,6 +333,7 @@ export class AuthService {
       canAccessFleetVideo: user.canAccessFleetVideo === true,
       canAccessBucketActivations: user.canAccessBucketActivations === true,
       canManageProductionControl: user.canManageProductionControl === true,
+      canAccessSsmaLicenses: user.canAccessSsmaLicenses === true,
       mustChangePassword: user.mustChangePassword === true,
       canAccessMonthlyChecklist: user.canAccessMonthlyChecklist === true,
     };
@@ -349,6 +355,7 @@ export class AuthService {
     canAccessFleetVideo?: boolean | null;
     canAccessBucketActivations?: boolean | null;
     canManageProductionControl?: boolean | null;
+    canAccessSsmaLicenses?: boolean | null;
     mustChangePassword?: boolean | null;
     canAccessMonthlyChecklist?: boolean | null;
   }) {
@@ -368,6 +375,7 @@ export class AuthService {
       canAccessFleetVideo: user.canAccessFleetVideo === true,
       canAccessBucketActivations: user.canAccessBucketActivations === true,
       canManageProductionControl: user.canManageProductionControl === true,
+      canAccessSsmaLicenses: user.canAccessSsmaLicenses === true,
       mustChangePassword: user.mustChangePassword === true,
       canAccessMonthlyChecklist: user.canAccessMonthlyChecklist === true,
     };

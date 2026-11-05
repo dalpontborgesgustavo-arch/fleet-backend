@@ -27,27 +27,48 @@ export class SsmaLicensesController {
 
   @Get()
   findAll(@Req() req: any) {
-    return this.ssmaLicensesService.findAll(req.user?.role);
+    return this.ssmaLicensesService.findAll(
+      req.user?.role,
+      req.user?.canAccessSsmaLicenses === true,
+    );
   }
 
   @Post()
   create(@Req() req: any, @Body() data: any) {
-    return this.ssmaLicensesService.create(data, req.user?.role, req.user?.sub);
+    return this.ssmaLicensesService.create(
+      data,
+      req.user?.role,
+      req.user?.sub,
+      req.user?.canAccessSsmaLicenses === true,
+    );
   }
 
   @Put(':id')
   update(@Req() req: any, @Param('id') id: string, @Body() data: any) {
-    return this.ssmaLicensesService.update(id, data, req.user?.role);
+    return this.ssmaLicensesService.update(
+      id,
+      data,
+      req.user?.role,
+      req.user?.canAccessSsmaLicenses === true,
+    );
   }
 
   @Patch(':id/deactivate')
   deactivate(@Req() req: any, @Param('id') id: string) {
-    return this.ssmaLicensesService.deactivate(id, req.user?.role);
+    return this.ssmaLicensesService.deactivate(
+      id,
+      req.user?.role,
+      req.user?.canAccessSsmaLicenses === true,
+    );
   }
 
   @Delete(':id')
   remove(@Req() req: any, @Param('id') id: string) {
-    return this.ssmaLicensesService.deactivate(id, req.user?.role);
+    return this.ssmaLicensesService.deactivate(
+      id,
+      req.user?.role,
+      req.user?.canAccessSsmaLicenses === true,
+    );
   }
 
   @Post(':id/renewals')

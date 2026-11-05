@@ -245,14 +245,18 @@ export class SsmaLicensesService implements OnModuleInit, OnModuleDestroy {
     if (this.alertStartupTimer) clearTimeout(this.alertStartupTimer);
   }
 
-  private ensureAccess(role?: string | null) {
-    if (!ALLOWED_ROLES.has(normalizeRole(role))) {
+  private ensureAccess(role?: string | null, canAccessRegistration = false) {
+    const normalizedRole = normalizeRole(role);
+    if (
+      !ALLOWED_ROLES.has(normalizedRole) &&
+      !(normalizedRole === 'supervisor_apoio' && canAccessRegistration)
+    ) {
       throw new ForbiddenException('Sem permissao para acessar licencas SSMA');
     }
   }
 
-  async findAll(actorRole?: string | null) {
-    this.ensureAccess(actorRole);
+  async findAll(actorRole?: string | null, canAccessRegistration = false) {
+    this.ensureAccess(actorRole, canAccessRegistration);
 
     const records = await this.prisma.ssmaLicense.findMany({
       where: { active: true },
@@ -263,8 +267,13 @@ export class SsmaLicensesService implements OnModuleInit, OnModuleDestroy {
     return records.map((record) => this.serializeLicense(record));
   }
 
-  async create(data: any, actorRole?: string | null, actorId?: string | null) {
-    this.ensureAccess(actorRole);
+  async create(
+    data: any,
+    actorRole?: string | null,
+    actorId?: string | null,
+    canAccessRegistration = false,
+  ) {
+    this.ensureAccess(actorRole, canAccessRegistration);
 
     const payload = this.parseLicensePayload(data);
     const created = await this.prisma.ssmaLicense.create({
@@ -278,8 +287,13 @@ export class SsmaLicensesService implements OnModuleInit, OnModuleDestroy {
     return this.serializeLicense(created);
   }
 
-  async update(id: string, data: any, actorRole?: string | null) {
-    this.ensureAccess(actorRole);
+  async update(
+    id: string,
+    data: any,
+    actorRole?: string | null,
+    canAccessRegistration = false,
+  ) {
+    this.ensureAccess(actorRole, canAccessRegistration);
 
     const existing = await this.ensureLicenseExists(id);
     const payload = this.parseLicensePayload(data);
@@ -305,8 +319,12 @@ export class SsmaLicensesService implements OnModuleInit, OnModuleDestroy {
     return this.serializeLicense(updated);
   }
 
-  async deactivate(id: string, actorRole?: string | null) {
-    this.ensureAccess(actorRole);
+  async deactivate(
+    id: string,
+    actorRole?: string | null,
+    canAccessRegistration = false,
+  ) {
+    this.ensureAccess(actorRole, canAccessRegistration);
 
     await this.ensureLicenseExists(id);
     await this.prisma.ssmaLicense.update({
