@@ -2,12 +2,12 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { USINA_ASPHALT_TEAM_CONTEXT } from '../usina-asphalt-teams/usina-asphalt-teams.rules';
 import { getLucasFleetRosterMonth } from './lucas-fleet-roster.controller';
-import { monthlyWorkforceKind } from '../checklist/monthly-workforce.rules';
+import { isSelectableTotvsEmployee, monthlyWorkforceKind } from '../checklist/monthly-workforce.rules';
 
 type LaborAssignment = { role?: unknown; employeeKey?: unknown };
 
 function normalized(value: unknown) {
-  return String(value || '')
+  return (typeof value === 'string' ? value : '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .trim()
@@ -50,7 +50,7 @@ export async function getLucasFleetGroupLaborActuals(
     prisma.checklist.findMany({
       where: { type: 'MONTHLY', year: month.getUTCFullYear(), month: month.getUTCMonth() + 1,
         vehicleId: { in: ids } },
-      select: { vehicleId: true, vehicleStopped: true, status: true,
+      select: { vehicleId: true, year: true, month: true, vehicleStopped: true, status: true,
         driverEmployeeKey: true, laborAssignments: true },
     }),
   ]);
@@ -60,20 +60,63 @@ export async function getLucasFleetGroupLaborActuals(
     if (!row.vehicleId) continue;
     checklistByVehicle.set(row.vehicleId, [...(checklistByVehicle.get(row.vehicleId) || []), row]);
   }
-  const groups = new Map<string, { vehicleIds: string[]; keys: Set<string>; complete: boolean }>();
+  const missingCurrentIds = ids.filter((id) => !checklistByVehicle.has(id));
+  const historicalChecklists = missingCurrentIds.length
+    ? await prisma.checklist.findMany({
+      where: {
+        type: 'MONTHLY',
+        vehicleId: { in: missingCurrentIds },
+        OR: [
+          { year: { lt: month.getUTCFullYear() } },
+          { year: month.getUTCFullYear(), month: { lt: month.getUTCMonth() + 1 } },
+        ],
+      },
+      select: { vehicleId: true, year: true, month: true, vehicleStopped: true, status: true,
+        driverEmployeeKey: true, laborAssignments: true },
+      orderBy: [{ year: 'desc' }, { month: 'desc' }],
+    })
+    : [];
+  const previousByVehicle = new Map<string, typeof historicalChecklists>();
+  for (const row of historicalChecklists) {
+    if (!row.vehicleId) continue;
+    const selected = previousByVehicle.get(row.vehicleId);
+    if (!selected?.length) {
+      previousByVehicle.set(row.vehicleId, [row]);
+    } else if (selected[0].year === row.year && selected[0].month === row.month) {
+      // An ambiguous latest month must not silently fall back to an older assignment.
+      selected.push(row);
+    }
+  }
+  const inheritedKeys = new Set<string>();
+  const groups = new Map<string, { vehicleIds: string[]; keys: Set<string>; complete: boolean;
+    inheritedVehicles: number; inheritedMonths: Set<string> }>();
   for (const vehicle of activeRows) {
     const groupKey = lucasFleetGroupKey(vehicle);
     if (!groupKey) continue;
-    const group = groups.get(groupKey) || { vehicleIds: [], keys: new Set<string>(), complete: true };
+    const group = groups.get(groupKey) || { vehicleIds: [], keys: new Set<string>(),
+      complete: true, inheritedVehicles: 0, inheritedMonths: new Set<string>() };
     group.vehicleIds.push(vehicle.id);
     if (vehicleById.get(vehicle.id)?.checklistEnabled !== false) {
-      const matches = checklistByVehicle.get(vehicle.id) || [];
+      const current = checklistByVehicle.get(vehicle.id) || [];
+      const inherited = current.length ? [] : previousByVehicle.get(vehicle.id) || [];
+      const matches = current.length ? current : inherited;
       if (matches.length !== 1) {
         group.complete = false;
+      } else if (inherited.length &&
+        (matches[0].vehicleStopped || matches[0].status === 'em_manutencao')) {
+        // A previous stopped/maintenance inspection is not proof of operation this month.
+        group.complete = false;
       } else if (!matches[0].vehicleStopped && matches[0].status !== 'em_manutencao') {
+        if (inherited.length) {
+          group.inheritedVehicles += 1;
+          group.inheritedMonths.add(`${matches[0].year}-${String(matches[0].month).padStart(2, '0')}`);
+        }
         const driverKey = matches[0].driverEmployeeKey;
         if (!driverKey) group.complete = false;
-        else group.keys.add(driverKey);
+        else {
+          group.keys.add(driverKey);
+          if (inherited.length) inheritedKeys.add(driverKey);
+        }
         const extras = matches[0].laborAssignments;
         if (monthlyWorkforceKind(vehicle.subgroup) !== 'STANDARD' && !Array.isArray(extras)) {
           // Old free-text checklists never confirmed whether the special crew was complete.
@@ -87,6 +130,7 @@ export async function getLucasFleetGroupLaborActuals(
               group.complete = false;
             } else {
               group.keys.add(item.employeeKey.trim());
+              if (inherited.length) inheritedKeys.add(item.employeeKey.trim());
             }
           }
         }
@@ -108,7 +152,16 @@ export async function getLucasFleetGroupLaborActuals(
       unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId, queryCode: 'IND.BI.0025',
       competence: month, employeeKey: { in: keys }, isCurrent: true, active: true },
     select: { employeeKey: true, totalGeneralLine: true, syncRun: { select: { status: true, rejectedRows: true } } },
-  }) : [];
+    }) : [];
+  const inheritedEmployees = inheritedKeys.size ? await prisma.totvsEmployeeSnapshot.findMany({
+      where: { companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+        unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId, competence: month,
+        employeeKey: { in: [...inheritedKeys] }, isCurrent: true, active: true },
+      select: { employeeKey: true, employmentStatus: true },
+    }) : [];
+  const activeInheritedKeys = new Set(inheritedEmployees
+    .filter((row) => isSelectableTotvsEmployee(row.employmentStatus))
+    .map((row) => row.employeeKey));
   const costs = new Map<string, typeof aggregates>();
   for (const row of aggregates) {
     costs.set(row.employeeKey, [...(costs.get(row.employeeKey) || []), row]);
@@ -120,6 +173,7 @@ export async function getLucasFleetGroupLaborActuals(
     let amount = new Decimal(0);
     for (const key of group.keys) {
       if ((keyGroups.get(key)?.size || 0) > 1) complete = false;
+      if (inheritedKeys.has(key) && !activeInheritedKeys.has(key)) complete = false;
       const rows = costs.get(key) || [];
       if (!rows.length || rows.some((row) => row.totalGeneralLine === null ||
         row.syncRun.status !== 'SUCCEEDED' || row.syncRun.rejectedRows !== 0)) {
@@ -133,6 +187,8 @@ export async function getLucasFleetGroupLaborActuals(
       laborActual: complete ? amount.toFixed(6) : null,
       vehicleCount: group.vehicleIds.length,
       employeeCount: group.keys.size,
+      inheritedVehicleCount: group.inheritedVehicles,
+      inheritedFromMonths: [...group.inheritedMonths].sort(),
       status: complete ? 'COMPLETE' : 'PENDING_ASSIGNMENT_OR_SOURCE',
     };
   });
