@@ -40,3 +40,18 @@ usuários explicitamente autorizados por ID em
 três funcionários distintos efetivamente valorizados têm o valor suprimido.
 Não há total geral de mão de obra neste endpoint para reconstruir o grupo por
 subtração. O ID explícito de Lucas precisa ser conferido antes de configurar.
+
+## Evidência local em 05/11/2026
+
+- Prisma validou o schema; build e 402 testes do backend passaram.
+- As duas migrations foram executadas em PostgreSQL 18.6 isolado (PGlite/WASM),
+  com uma tabela `Vehicle` mínima apenas para satisfazer a FK. Seis checagens
+  passaram: inserção e leitura, bloqueio de alteração/exclusão de fato aprovado,
+  aposentadoria permitida sem mudar valor, reativação bloqueada e aprovação
+  imutável. O total de teste permaneceu `100.000000`.
+- Isso **não** equivale a ensaiar sobre uma cópia completa do banco JR, nem
+  comprova a execução da consulta `IND.BI.0038` no TOTVS. Nenhuma migration foi
+  aplicada na produção.
+- O ID de Lucas da Apresentação não foi confirmado. Até conferir a identidade
+  em fonte autenticada, não configurar `LUCAS_FLEET_LABOR_VIEWER_USER_IDS`;
+  apenas CEO/admin recebem valores elegíveis.
