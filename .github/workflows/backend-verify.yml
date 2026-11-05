@@ -81,6 +81,9 @@ jobs:
       # is deliberately minimal, so create only the referenced key before the
       # additive per-user preference migration.
       - run: npx prisma db execute --file scripts/duda-bd-geral/rehearsal-user.sql --schema prisma/schema.prisma
+      - run: npx prisma db execute --file prisma/migrations/20261105090000_add_ssma_license_user_access/migration.sql --schema prisma/schema.prisma
+      - run: >-
+          node -e 'const {PrismaClient}=require("@prisma/client");const db=new PrismaClient();db.$queryRaw`SELECT column_name FROM information_schema.columns WHERE table_name = ${"User"} AND column_name = ${"canAccessSsmaLicenses"}`.then(rows=>{if(rows.length!==1)process.exitCode=1;console.log("SSMA license user access column readable:",rows.length);}).catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.$disconnect())'
       - run: npx prisma db execute --file prisma/migrations/20261021210000_add_duda_bd_geral_view_preference/migration.sql --schema prisma/schema.prisma
       - run: npx prisma db execute --file prisma/migrations/20261021223000_add_duda_bd_geral_manual_entries/migration.sql --schema prisma/schema.prisma
       - run: npx prisma db execute --file prisma/migrations/20261021235000_add_duda_observations/migration.sql --schema prisma/schema.prisma
