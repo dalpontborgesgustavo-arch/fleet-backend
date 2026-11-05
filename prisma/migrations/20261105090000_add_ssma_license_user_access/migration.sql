@@ -1,0 +1,1 @@
+ALTER TABLE "User" ADD COLUMN "canAccessSsmaLicenses" BOOLEAN NOT NULL DEFAULT false;

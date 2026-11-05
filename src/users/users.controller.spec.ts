@@ -61,6 +61,59 @@ describe('UsersController supervisor support profile', () => {
     });
   });
 
+  it('allows only an admin to grant license registration to support', async () => {
+    await controller.create(
+      { user: { role: 'admin' } },
+      {
+        email: 'apoio-licencas@jr.com.br',
+        name: 'Apoio licencas',
+        password: 'temporaria123',
+        role: 'supervisor_apoio',
+        canAccessSsmaLicenses: true,
+      },
+    );
+    expect(prismaUser.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ canAccessSsmaLicenses: true }),
+    });
+
+    await controller.create(
+      { user: { role: 'supervisor_apoio' } },
+      {
+        email: 'motorista-licencas@jr.com.br',
+        name: 'Motorista',
+        password: 'temporaria123',
+        role: 'motorista',
+        canAccessSsmaLicenses: true,
+      },
+    );
+    expect(prismaUser.create).toHaveBeenLastCalledWith({
+      data: expect.objectContaining({ canAccessSsmaLicenses: false }),
+    });
+  });
+
+  it('preserves the individual grant on an unrelated edit and revokes it on role change', async () => {
+    prismaUser.findUnique.mockResolvedValue({
+      id: 'support-1',
+      role: 'supervisor_apoio',
+      canAccessSsmaLicenses: true,
+      filial: 'PEDRAFORTE',
+    });
+    await controller.update({ user: { role: 'admin' } }, 'support-1', {
+      name: 'Apoio',
+    });
+    expect(prismaUser.update).toHaveBeenLastCalledWith({
+      where: { id: 'support-1' },
+      data: expect.objectContaining({ canAccessSsmaLicenses: true }),
+    });
+    await controller.update({ user: { role: 'admin' } }, 'support-1', {
+      role: 'financeiro',
+    });
+    expect(prismaUser.update).toHaveBeenLastCalledWith({
+      where: { id: 'support-1' },
+      data: expect.objectContaining({ canAccessSsmaLicenses: false }),
+    });
+  });
+
   it('lets an admin create a financial user', async () => {
     await controller.create(
       { user: { role: 'admin' } },

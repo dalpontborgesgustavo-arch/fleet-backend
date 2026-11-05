@@ -42,6 +42,7 @@ model User {
   canAccessFleetVideo             Boolean                       @default(false)
   canAccessBucketActivations      Boolean                       @default(false)
   canManageProductionControl      Boolean                       @default(false)
+  canAccessSsmaLicenses           Boolean                       @default(false)
   createdAt                       DateTime                      @default(now())
   occurrences                     Occurrence[]
   checklists                      Checklist[]
