@@ -33,13 +33,20 @@ a comparação deve usar os próprios valores e filtros da consulta oficial.
 3. Configurar `TOTVS_RM_FLEET_LABOR_QUERY_CODE=IND.BI.0039`. A consulta é
    lida por demanda e apenas estagiada; não substitui a fonte atual.
 4. Confrontar `IND.BI.0039` com a `IND.BI.0025` viva por competência:
-   funcionário/coligada/período, contagem de linhas, total exato e fórmula.
-   Guardar recibo da comparação independente; o `evidenceRef` da API apenas
-   registra sua referência e **não verifica a prova por si só**.
+   funcionário/coligada/período, conjunto completo de chaves e valor individual.
+   O endpoint administrativo `GET /lucas-fleet-results/labor-source/runs/:runId/parity?competence=AAAA-MM`
+   informa até 25 exemplos e a contagem total de divergências. Custo nulo,
+   chave ausente, duplicada ou valor diferente bloqueia o aceite, inclusive
+   quando o total geral coincide. O último run da `0025` deve estar concluído
+   sem rejeições; as duas capturas devem estar dentro de 36 horas. O campo
+   `evidenceRef` é apenas observação humana e não substitui essa comparação.
 5. Somente após esse aceite técnico, habilitar temporariamente
    `TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED=true` e aprovar cada competência
-   com hash, contagem, total e referência da evidência. Confirmar pelo endpoint
-   de readback e pela tela. Depois desabilitar a ativação manual, se desejado.
+   com hash, contagem, total e referência da evidência. O backend recalcula o
+   hash de cada fato estagiado e grava um recibo imutável vinculado aos runs
+   `0039` e `0025`, com os hashes de ambos os lados. Confirmar pelo endpoint
+   de readback e pela tela. Se o hash do lote ou da base `0025` mudar depois,
+   o readback falha fechado. Depois desabilitar a ativação manual.
 6. Para estágio diário, `TOTVS_RM_FLEET_LABOR_AUTO_STAGE=true` liga o cron
    às 04:30 de São Paulo, após a consulta compartilhada das 04:00. Ele nunca
    ativa competência automaticamente. Deixar desligado até comprovar carga,
@@ -50,24 +57,40 @@ O leitor da frota usa a fonte dedicada somente para competência aprovada e
 sem recorrer aos números provisórios da 0025. Sem aprovação, mantém o legado
 provisório. Não mistura fontes no mesmo mês.
 
+Para retirar uma aprovação, usar apenas a rota administrativa
+`POST /lucas-fleet-results/labor-source/approvals/:approvalId/reverse` com
+justificativa. Ela requer a mesma flag temporária de ativação, grava recibo de
+reversão imutável e retira as linhas da condição corrente sem apagar fatos,
+aprovação ou auditoria. O leitor não trata uma reversão como zero nem recorre
+silenciosamente à fonte provisória. Uma aprovação posterior exige novo lote
+e nova prova de paridade.
+
 O endpoint de Resultados Frota expõe valor de mão de obra apenas a CEO/admin ou
 usuários explicitamente autorizados por ID em
 `LUCAS_FLEET_LABOR_VIEWER_USER_IDS`. Mesmo nesse público, grupos com menos de
 três funcionários distintos efetivamente valorizados têm o valor suprimido.
 Não há total geral de mão de obra neste endpoint para reconstruir o grupo por
-subtração. O ID explícito de Lucas precisa ser conferido antes de configurar.
+subtração. O usuário da Apresentação é Lucas Arcaro Cirico (perfil de
+Licitação); não confundir com Lucas Rodrigues Figueira (Produção). Configure
+o ID autenticado do primeiro somente após o corte, preservando CEO/admin por
+papel. Não expor IDs internos na interface.
 
 ## Evidência local em 05/11/2026
 
-- Prisma validou o schema; build e 402 testes do backend passaram.
-- As duas migrations foram executadas em PostgreSQL 18.6 isolado (PGlite/WASM),
+- Prisma validou o schema; build e testes do backend passaram localmente.
+- A versão anterior das duas migrations foi executada em PostgreSQL 18.6 isolado (PGlite/WASM),
   com uma tabela `Vehicle` mínima apenas para satisfazer a FK. Seis checagens
   passaram: inserção e leitura, bloqueio de alteração/exclusão de fato aprovado,
   aposentadoria permitida sem mudar valor, reativação bloqueada e aprovação
   imutável. O total de teste permaneceu `100.000000`.
-- Isso **não** equivale a ensaiar sobre uma cópia completa do banco JR, nem
+- As novas colunas de recibo, trigger de fatos estagiados e tabela de reversão
+  têm ensaio PostgreSQL adicionado à CI, incluindo mutações/deleções bloqueadas
+  e as transições permitidas de aprovação e aposentadoria; ainda precisa passar
+  na CI Linux antes de qualquer release.
+  O ensaio anterior **não** equivale a ensaiar sobre uma cópia completa do banco JR, nem
   comprova a execução da consulta `IND.BI.0039` no TOTVS. Nenhuma migration foi
   aplicada na produção.
-- O ID de Lucas da Apresentação não foi confirmado. Até conferir a identidade
-  em fonte autenticada, não configurar `LUCAS_FLEET_LABOR_VIEWER_USER_IDS`;
-  apenas CEO/admin recebem valores elegíveis.
+- A identidade de Lucas da Apresentação foi conferida no banco da JR em modo
+  somente leitura. A variável `LUCAS_FLEET_LABOR_VIEWER_USER_IDS` ainda não
+  foi configurada neste worktree; até o corte, apenas CEO/admin recebem
+  valores elegíveis.

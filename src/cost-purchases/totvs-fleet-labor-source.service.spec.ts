@@ -1,6 +1,8 @@
 import { normalizeFleetLaborRows, TotvsFleetLaborSourceService } from './totvs-fleet-labor-source.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import { compareFleetLaborParity, fingerprint0025Aggregate,
+  fingerprintFleetLaborFacts } from './fleet-labor-integrity';
 
 const row = (competence: string, employeeNumber: string, period = 20,
   total = '100.00') => ({
@@ -10,11 +12,31 @@ const row = (competence: string, employeeNumber: string, period = 20,
   FORMULA_ID: 'IND.BI.0025_RATEADO_V1',
 });
 
+const scope = { companyId: 'JR_CONSTRUCOES', unitId: 'USINA_ASFALTO_ICARA',
+  queryCode: 'IND.BI.0039', ruleVersion: 'IND.BI.0025_RATEADO_V1',
+  syncRunId: 'run-1' };
+function fact(competence: string, employeeNumber: string, total = '100.00') {
+  return { ...normalizeFleetLaborRows([row(competence, employeeNumber, 20, total)]).rows[0],
+    ...scope, id: `fact-${competence}-${employeeNumber}`,
+    active: true, isCurrent: false, approvalId: null };
+}
+function baseline(item: ReturnType<typeof fact>) {
+  const source = { companyCode: item.companyCode, employeeNumber: item.employeeNumber,
+    employeeKey: item.employeeKey, competence: item.competence, period: item.period,
+    totalGeneralLine: item.totalGeneralRateado,
+    sourceRows: 1, allocationRows: 0, fixedAllocationValue: null,
+    allocationClosed: false, officialCostEligible: false,
+    pendingReason: 'PFRATEIOFIXO_CARDINALIDADE_NAO_RECONCILIADA',
+    contentHash: '',
+    syncRunId: 'baseline-row-run', syncRun: { status: 'SUCCEEDED', rejectedRows: 0 } };
+  return { ...source, contentHash: fingerprint0025Aggregate(source) };
+}
+
 describe('fonte isolada de mao de obra de Resultados Frota', () => {
   it('aceita duas competencias e calcula totais exatos sem misturar meses', () => {
     const prepared = normalizeFleetLaborRows([
       row('2026-09', '0002', 20, '123.456789'),
-      row('2026-10', '0001', 30, '9.01'),
+      row('2026-10', '0001', 20, '9.01'),
       row('2026-09', '0001', 20, '10.00'),
     ]);
     expect(prepared.competences).toEqual([
@@ -47,6 +69,11 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
     expect(() => normalizeFleetLaborRows([
       { ...row('2026-10', '0001'), FORMULA_ID: 'IND.BI.0025' },
     ])).toThrow(/Formula/);
+  });
+
+  it('rejeita periodo de decimo terceiro em mes incorreto', () => {
+    expect(() => normalizeFleetLaborRows([row('2026-10', '0001', 30)]))
+      .toThrow(/Periodo de decimo terceiro/);
   });
 
   it('rejeita o antigo rascunho integral mesmo se ele alegar cardinalidade valida', () => {
@@ -119,6 +146,12 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
       expect(second).toMatchObject({ runId: 'run-1', checkRunId: 'run-2',
         status: 'UNCHANGED', rowCount: 2 });
       expect(tx.totvsFleetLaborCost.createMany).toHaveBeenCalledTimes(1);
+      expect(prisma.totvsFleetLaborSyncRun.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({
+          status: 'STAGED', approvals: { none: {} },
+          finishedAt: { gte: expect.any(Date) },
+        }) }),
+      );
       expect(prisma.totvsFleetLaborSyncRun.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: 'UNCHANGED' }) }),
       );
@@ -138,19 +171,23 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
   it('ativa somente a competencia conciliada do lote de dois meses', async () => {
     const old = process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED;
     process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED = 'true';
-    const rowId = 'row-september';
+    const facts = [fact('2026-09', '0001'), fact('2026-10', '0002')];
+    const sourceHash = fingerprintFleetLaborFacts(facts, scope).sourceHash;
+    const now = new Date();
     const tx = {
       totvsFleetLaborSyncRun: { findUnique: jest.fn().mockResolvedValue({
         id: 'run-1', status: 'STAGED', companyId: 'JR_CONSTRUCOES',
-        unitId: 'USINA_ASFALTO_ICARA', sourceHash: 'a'.repeat(64),
+        unitId: 'USINA_ASFALTO_ICARA', sourceHash, acceptedRows: 2,
         queryCode: 'IND.BI.0039', ruleVersion: 'IND.BI.0025_RATEADO_V1',
+        finishedAt: now,
       }) },
+      totvsEmployeeSyncRun: { findFirst: jest.fn().mockResolvedValue({
+        id: 'baseline-run', status: 'SUCCEEDED', rejectedRows: 0,
+        finishedAt: now, contextCode: '0/P',
+      }) },
+      totvsEmployeeCostAggregate: { findMany: jest.fn().mockResolvedValue([baseline(facts[0])]) },
       totvsFleetLaborCost: {
-        findMany: jest.fn().mockResolvedValue([{ id: rowId,
-          competence: new Date('2026-09-01T00:00:00.000Z'),
-          employeeKey: '1-0001', period: 20,
-          totalGeneralRateado: new Prisma.Decimal('100.00'), cardinalityOk: true,
-          ruleVersion: 'IND.BI.0025_RATEADO_V1' }]),
+        findMany: jest.fn().mockResolvedValue(facts),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       totvsFleetLaborApproval: {
@@ -162,18 +199,126 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
     try {
       const service = new TotvsFleetLaborSourceService(prisma as unknown as PrismaService);
       const result = await service.activate('run-1', {
-        competence: '2026-09', sourceHash: 'a'.repeat(64), rowCount: 1,
+        competence: '2026-09', sourceHash, rowCount: 1,
         totalCost: '100.00', evidenceRef: 'parity-report-2026-09-reviewed',
       }, 'admin-1');
-      expect(result).toEqual({ approvalId: 'approval-september',
-        competence: '2026-09', alreadyActive: false });
+      expect(result).toMatchObject({ approvalId: 'approval-september',
+        competence: '2026-09', alreadyActive: false, baselineRunId: 'baseline-run' });
       expect(tx.totvsFleetLaborCost.findMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: { syncRunId: 'run-1', competence: new Date('2026-09-01T00:00:00.000Z') },
+        where: { syncRunId: 'run-1' },
       }));
       expect(tx.totvsFleetLaborCost.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-        where: { syncRunId: 'run-1', competence: new Date('2026-09-01T00:00:00.000Z') },
+        where: { syncRunId: 'run-1', competence: new Date('2026-09-01T00:00:00.000Z'),
+          approvalId: null, isCurrent: false },
         data: { isCurrent: true, approvalId: 'approval-september' },
       }));
+      expect(tx.totvsFleetLaborApproval.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ baselineSyncRunId: 'baseline-run',
+          baselineHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          candidateHash: expect.stringMatching(/^[a-f0-9]{64}$/) }),
+      }));
+    } finally {
+      if (old === undefined) delete process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED;
+      else process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED = old;
+    }
+  });
+
+  it('relata diferencas por funcionario e bloqueia ativacao com soma igual', async () => {
+    const old = process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED;
+    process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED = 'true';
+    const facts = [fact('2026-10', '0001', '100.00'), fact('2026-10', '0002', '50.00')];
+    const sourceHash = fingerprintFleetLaborFacts(facts, scope).sourceHash;
+    const swappedA = { ...baseline(facts[0]), totalGeneralLine: new Prisma.Decimal('50.00') };
+    const swappedB = { ...baseline(facts[1]), totalGeneralLine: new Prisma.Decimal('100.00') };
+    swappedA.contentHash = fingerprint0025Aggregate(swappedA);
+    swappedB.contentHash = fingerprint0025Aggregate(swappedB);
+    const now = new Date();
+    const tx = {
+      totvsFleetLaborSyncRun: { findUnique: jest.fn().mockResolvedValue({
+        id: 'run-1', status: 'STAGED', companyId: scope.companyId,
+        unitId: scope.unitId, queryCode: scope.queryCode,
+        ruleVersion: scope.ruleVersion, sourceHash, acceptedRows: 2,
+        finishedAt: now,
+      }) },
+      totvsEmployeeSyncRun: { findFirst: jest.fn().mockResolvedValue({
+        id: 'baseline-run', status: 'SUCCEEDED', rejectedRows: 0, finishedAt: now,
+        contextCode: '0/P',
+      }) },
+      totvsFleetLaborCost: { findMany: jest.fn().mockResolvedValue(facts),
+        updateMany: jest.fn() },
+      totvsEmployeeCostAggregate: { findMany: jest.fn().mockResolvedValue([
+        swappedA, swappedB,
+      ]) },
+      totvsFleetLaborApproval: { findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn() },
+    };
+    const prisma = { ...tx, $transaction: jest.fn().mockImplementation(async (callback) => callback(tx)) };
+    try {
+      const service = new TotvsFleetLaborSourceService(prisma as unknown as PrismaService);
+      expect(await service.parity('run-1', '2026-10')).toMatchObject({
+        matching: false, issueCount: 2, baselineTotal: '150.000000',
+        candidateTotal: '150.000000',
+      });
+      await expect(service.activate('run-1', { competence: '2026-10',
+        sourceHash, rowCount: 2, totalCost: '150.00',
+        evidenceRef: 'manual-note-does-not-prove-parity',
+      })).rejects.toThrow(/Paridade/);
+      expect(tx.totvsFleetLaborApproval.create).not.toHaveBeenCalled();
+      expect(tx.totvsFleetLaborCost.updateMany).not.toHaveBeenCalled();
+    } finally {
+      if (old === undefined) delete process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED;
+      else process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED = old;
+    }
+  });
+
+  it('bloqueia paridade se a ultima captura 0025 tem rejeicoes', async () => {
+    const item = fact('2026-10', '0001');
+    const sourceHash = fingerprintFleetLaborFacts([item], scope).sourceHash;
+    const now = new Date();
+    const prisma = {
+      totvsFleetLaborSyncRun: { findUnique: jest.fn().mockResolvedValue({
+        id: 'run-1', status: 'STAGED', companyId: scope.companyId,
+        unitId: scope.unitId, queryCode: scope.queryCode,
+        ruleVersion: scope.ruleVersion, sourceHash, acceptedRows: 1,
+        finishedAt: now,
+      }) },
+      totvsEmployeeSyncRun: { findFirst: jest.fn().mockResolvedValue({
+        id: 'baseline-run', status: 'SUCCEEDED', rejectedRows: 1, finishedAt: now,
+        contextCode: '0/P',
+      }) },
+      totvsFleetLaborCost: { findMany: jest.fn() },
+    };
+    const service = new TotvsFleetLaborSourceService(prisma as unknown as PrismaService);
+    await expect(service.parity('run-1', '2026-10')).rejects.toThrow(/incompleta/);
+    expect(prisma.totvsFleetLaborCost.findMany).not.toHaveBeenCalled();
+  });
+
+  it('registra reversao imutavel sem apagar a aprovacao anterior', async () => {
+    const old = process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED;
+    process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED = 'true';
+    const tx = {
+      totvsFleetLaborApproval: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'approval-1',
+          companyId: scope.companyId, unitId: scope.unitId,
+          competence: new Date('2026-10-01T00:00:00.000Z'), reversal: null }),
+        findFirst: jest.fn().mockResolvedValue({ id: 'approval-1' }),
+      },
+      totvsFleetLaborReversal: { create: jest.fn().mockResolvedValue({ id: 'reverse-1' }) },
+      totvsFleetLaborCost: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    };
+    const prisma = { $transaction: jest.fn().mockImplementation(async (callback) => callback(tx)) };
+    try {
+      const service = new TotvsFleetLaborSourceService(prisma as unknown as PrismaService);
+      expect(await service.reverse('approval-1', 'Fonte corrigida e lote substituido', 'admin-1'))
+        .toEqual({ approvalId: 'approval-1', reversalId: 'reverse-1', alreadyReversed: false });
+      expect(tx.totvsFleetLaborReversal.create).toHaveBeenCalledWith({ data: {
+        approvalId: 'approval-1', reason: 'Fonte corrigida e lote substituido',
+        reversedById: 'admin-1',
+      } });
+      expect(tx.totvsFleetLaborCost.updateMany).toHaveBeenCalledWith({
+        where: { approvalId: 'approval-1', isCurrent: true, active: true },
+        data: { isCurrent: false },
+      });
     } finally {
       if (old === undefined) delete process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED;
       else process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED = old;
@@ -198,7 +343,9 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
         count: jest.fn().mockResolvedValue(0),
         updateMany: jest.fn(),
       },
-      totvsFleetLaborApproval: { findUnique: jest.fn().mockResolvedValue({ id: 'old-approval' }) },
+      totvsFleetLaborApproval: { findUnique: jest.fn().mockResolvedValue({
+        id: 'old-approval', reversal: { id: 'reversal-1' },
+      }) },
     };
     const prisma = { $transaction: jest.fn().mockImplementation(async (callback) => callback(tx)) };
     try {
@@ -229,15 +376,27 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
   });
 
   it('readback independente detecta total divergente apos aprovacao', async () => {
+    const approvedFact = { ...fact('2026-09', '0001'),
+      isCurrent: true, approvalId: 'approval-1' };
+    const fingerprint = fingerprintFleetLaborFacts([approvedFact], scope);
+    const parity = compareFleetLaborParity(fingerprint.entries, [baseline(approvedFact)]);
     const prisma = {
       totvsFleetLaborApproval: { findFirst: jest.fn().mockResolvedValue({
-        id: 'approval-1', sourceHash: 'c'.repeat(64), rowCount: 1,
+        id: 'approval-1', competence: approvedFact.competence,
+        syncRunId: 'run-1', baselineSyncRunId: 'baseline-run',
+        baselineHash: parity.baselineHash, candidateHash: fingerprint.sourceHash,
+        sourceHash: fingerprint.sourceHash, rowCount: 1,
         totalCost: new Prisma.Decimal('100.00'),
         evidenceRef: 'parity-report-2026-09-reviewed', approvedAt: new Date(),
         syncRun: { queryCode: 'IND.BI.0039', status: 'STAGED',
-          sourceHash: 'c'.repeat(64), ruleVersion: 'IND.BI.0025_RATEADO_V1' },
+          sourceHash: fingerprint.sourceHash, ruleVersion: 'IND.BI.0025_RATEADO_V1' },
       }) },
+      totvsEmployeeSyncRun: { findUnique: jest.fn().mockResolvedValue({
+        status: 'SUCCEEDED', rejectedRows: 0,
+      }) },
+      totvsEmployeeCostAggregate: { findMany: jest.fn().mockResolvedValue([baseline(approvedFact)]) },
       totvsFleetLaborCost: {
+        findMany: jest.fn().mockResolvedValue([approvedFact]),
         count: jest.fn().mockResolvedValue(1),
         aggregate: jest.fn().mockResolvedValueOnce({
           _sum: { totalGeneralRateado: new Prisma.Decimal('100.00') },

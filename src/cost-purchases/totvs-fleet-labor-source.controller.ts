@@ -41,11 +41,25 @@ export class TotvsFleetLaborSourceController {
     return this.source.preview(runId);
   }
 
+  @Get('runs/:runId/parity')
+  parity(@Req() req: any, @Param('runId') runId: string,
+    @Query('competence') competence: string) {
+    this.assertAdmin(req);
+    return this.source.parity(runId, competence);
+  }
+
   @Post('runs/:runId/activate')
   activate(@Req() req: any, @Param('runId') runId: string,
     @Body() body: { competence: string; sourceHash: string; rowCount: number;
       totalCost: string; evidenceRef: string }) {
     this.assertAdmin(req);
     return this.source.activate(runId, body, req.user?.sub);
+  }
+
+  @Post('approvals/:approvalId/reverse')
+  reverse(@Req() req: any, @Param('approvalId') approvalId: string,
+    @Body() body: { reason: string }) {
+    this.assertAdmin(req);
+    return this.source.reverse(approvalId, body?.reason, req.user?.sub);
   }
 }

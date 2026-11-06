@@ -12,6 +12,10 @@ import { createHash } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { USINA_ASPHALT_TEAM_CONTEXT } from '../usina-asphalt-teams/usina-asphalt-teams.rules';
+import {
+  compareFleetLaborParity, fingerprintFleetLaborFacts,
+  verifyApprovedFleetLaborIntegrity,
+} from './fleet-labor-integrity';
 
 // The JR-approved business rule preserves the PFRATEIOFIXO allocation of IND.BI.0025.
 // The earlier unallocated IND.BI.0039 draft must fail this version check.
@@ -27,6 +31,7 @@ const TIMEOUT_MS = 20_000;
 const QUERY_CONTEXT = '0/P';
 const DAILY_STAGE_CRON = '0 30 4 * * *';
 const DAILY_STAGE_TIME_ZONE = 'America/Sao_Paulo';
+const PARITY_MAX_AGE_MS = 36 * 60 * 60_000;
 type SourceRow = Record<string, unknown>;
 
 type NormalizedRow = {
@@ -123,6 +128,10 @@ export function normalizeFleetLaborRows(rows: unknown): {
       throw new BadRequestException(`Formula ou cardinalidade nao reconciliada na linha ${index + 1}`);
     }
     const rowCompetence = competenceDate(field(row, 'DT_MES'));
+    if ((period === 30 && rowCompetence.getUTCMonth() !== 10) ||
+        (period === 40 && rowCompetence.getUTCMonth() !== 11)) {
+      throw new BadRequestException(`Periodo de decimo terceiro fora do mes esperado na linha ${index + 1}`);
+    }
     if (rowCompetence >= currentMonth) {
       throw new BadRequestException('A competencia precisa estar encerrada no calendario');
     }
@@ -160,6 +169,77 @@ export function normalizeFleetLaborRows(rows: unknown): {
 export class TotvsFleetLaborSourceService {
   private readonly logger = new Logger(TotvsFleetLaborSourceService.name);
   constructor(private readonly prisma: PrismaService) {}
+
+  private async evaluateParity(
+    db: Prisma.TransactionClient | PrismaService, runId: string, competence: Date,
+  ) {
+    const run = await db.totvsFleetLaborSyncRun.findUnique({ where: { id: runId } });
+    if (!run || run.status !== 'STAGED' ||
+        run.queryCode !== FLEET_LABOR_QUERY_CODE ||
+        run.ruleVersion !== FLEET_LABOR_FORMULA_ID ||
+        run.companyId !== USINA_ASPHALT_TEAM_CONTEXT.companyId ||
+        run.unitId !== USINA_ASPHALT_TEAM_CONTEXT.unitId) {
+      throw new ConflictException('Lote inexistente ou nao preparado');
+    }
+    const baselineRun = await db.totvsEmployeeSyncRun.findFirst({
+      where: { companyId: run.companyId, unitId: run.unitId,
+        queryCode: 'IND.BI.0025' }, orderBy: { startedAt: 'desc' },
+    });
+    const now = Date.now();
+    if (!run.finishedAt || now - run.finishedAt.getTime() > PARITY_MAX_AGE_MS ||
+        run.finishedAt.getTime() - now > 5 * 60_000 ||
+        !baselineRun || baselineRun.status !== 'SUCCEEDED' ||
+        baselineRun.rejectedRows !== 0 || !baselineRun.finishedAt ||
+        baselineRun.contextCode !== QUERY_CONTEXT ||
+        now - baselineRun.finishedAt.getTime() > PARITY_MAX_AGE_MS ||
+        baselineRun.finishedAt.getTime() - now > 5 * 60_000 ||
+        Math.abs(run.finishedAt.getTime() - baselineRun.finishedAt.getTime()) > PARITY_MAX_AGE_MS) {
+      throw new ConflictException('Capturas 0025/0039 fora da janela de 36h ou sincronizacao 0025 incompleta');
+    }
+    const rows = await db.totvsFleetLaborCost.findMany({ where: { syncRunId: run.id } });
+    if (!rows.length || rows.length !== run.acceptedRows || !run.sourceHash) {
+      throw new ConflictException('Lote dedicado incompleto');
+    }
+    const fingerprint = fingerprintFleetLaborFacts(rows, {
+      companyId: run.companyId, unitId: run.unitId,
+      queryCode: FLEET_LABOR_QUERY_CODE, ruleVersion: FLEET_LABOR_FORMULA_ID,
+      syncRunId: run.id,
+    });
+    if (fingerprint.sourceHash !== run.sourceHash) {
+      throw new ConflictException('Hash canonico do lote dedicado divergiu');
+    }
+    const monthRows = rows.filter((row) => row.competence.getTime() === competence.getTime());
+    if (!monthRows.length || monthRows.some((row) => row.approvalId !== null || row.isCurrent)) {
+      throw new ConflictException('Competencia ausente ou fatos do lote ja ativados');
+    }
+    const monthFingerprint = fingerprintFleetLaborFacts(monthRows, {
+      companyId: run.companyId, unitId: run.unitId,
+      queryCode: FLEET_LABOR_QUERY_CODE, ruleVersion: FLEET_LABOR_FORMULA_ID,
+      syncRunId: run.id,
+    });
+    const baseline = await db.totvsEmployeeCostAggregate.findMany({
+      where: { companyId: run.companyId, unitId: run.unitId,
+        source: 'TOTVS_RM', queryCode: 'IND.BI.0025', competence,
+        isCurrent: true, active: true },
+      select: { companyCode: true, employeeNumber: true, employeeKey: true,
+        competence: true, period: true, totalGeneralLine: true, contentHash: true,
+        sourceRows: true, allocationRows: true, fixedAllocationValue: true,
+        allocationClosed: true, officialCostEligible: true, pendingReason: true,
+        syncRunId: true, syncRun: { select: { status: true, rejectedRows: true } } },
+    });
+    const report = compareFleetLaborParity(monthFingerprint.entries, baseline);
+    return { run, baselineRun, report, candidateHash: monthFingerprint.sourceHash };
+  }
+
+  async parity(runId: string, competenceInput: string) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(competenceInput || '')) {
+      throw new BadRequestException('Competencia invalida');
+    }
+    const competence = new Date(`${competenceInput}-01T00:00:00.000Z`);
+    const { run, baselineRun, report } = await this.evaluateParity(this.prisma, runId, competence);
+    return { competence: competenceInput, runId: run.id,
+      baselineRunId: baselineRun.id, ...report };
+  }
 
   @Cron(DAILY_STAGE_CRON, { timeZone: DAILY_STAGE_TIME_ZONE })
   async stageDailyWhenEnabled() {
@@ -283,7 +363,10 @@ export class TotvsFleetLaborSourceService {
       const previous = await this.prisma.totvsFleetLaborSyncRun.findFirst({
         where: { companyId: run.companyId, unitId: run.unitId, queryCode: config.code,
           ruleVersion: FLEET_LABOR_FORMULA_ID, sourceHash: prepared.sourceHash,
-          acceptedRows: prepared.rows.length, status: 'STAGED' },
+          acceptedRows: prepared.rows.length, status: 'STAGED',
+          // A matching historical batch is not a fresh 0039 capture for parity.
+          finishedAt: { gte: new Date(Date.now() - PARITY_MAX_AGE_MS) },
+          approvals: { none: {} } },
         orderBy: { startedAt: 'desc' }, select: { id: true },
       });
       if (previous) {
@@ -374,12 +457,17 @@ export class TotvsFleetLaborSourceService {
       where: { companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
         unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId, competence: month },
       orderBy: [{ approvedAt: 'desc' }, { id: 'desc' }],
-      select: { id: true, sourceHash: true, rowCount: true, totalCost: true,
-        evidenceRef: true, approvedAt: true,
+      select: { id: true, companyId: true, unitId: true, competence: true,
+        syncRunId: true, baselineSyncRunId: true, baselineHash: true,
+        candidateHash: true, parityVerifiedAt: true,
+        sourceHash: true, rowCount: true, totalCost: true,
+        evidenceRef: true, approvedAt: true, reversal: { select: { id: true } },
         syncRun: { select: { queryCode: true, status: true, sourceHash: true,
           ruleVersion: true } } },
     });
     if (!approval) return { competence, officialReady: false, reason: 'NO_APPROVAL' };
+    if (approval.reversal) return { competence, officialReady: false,
+      reason: 'REVERSED', approvalId: approval.id };
     const where = { approvalId: approval.id, competence: month,
       companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
       unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId, isCurrent: true, active: true,
@@ -392,19 +480,20 @@ export class TotvsFleetLaborSourceService {
         _sum: { totalGeneralRateado: true } }),
     ]);
     const currentTotal = sum._sum.totalGeneralRateado || new Prisma.Decimal(0);
-    const officialReady = approval.syncRun.status === 'STAGED' &&
-      approval.syncRun.queryCode === FLEET_LABOR_QUERY_CODE &&
-      approval.syncRun.ruleVersion === FLEET_LABOR_FORMULA_ID &&
-      approval.syncRun.sourceHash === approval.sourceHash &&
-      totalRows === currentRows && currentRows === approval.rowCount &&
-      currentTotal.equals(approval.totalCost);
+    const officialReady = totalRows === currentRows &&
+      currentRows === approval.rowCount && currentTotal.equals(approval.totalCost) &&
+      await verifyApprovedFleetLaborIntegrity(this.prisma, approval, {
+        companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+        unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+        queryCode: FLEET_LABOR_QUERY_CODE, ruleVersion: FLEET_LABOR_FORMULA_ID,
+      });
     return { competence, officialReady, queryCode: approval.syncRun.queryCode,
       sourceHash: approval.sourceHash, rowCount: approval.rowCount, currentRows,
       expectedTotal: approval.totalCost.toFixed(6), currentTotal: currentTotal.toFixed(6),
       approvedAt: approval.approvedAt, evidenceRef: approval.evidenceRef };
   }
 
-  // The operator must supply independently checked totals and an evidence reference.
+  // Caller totals are an extra check; the immutable receipt comes from live 0025 parity.
   async activate(runId: string, expected: {
     competence: string; sourceHash: string; rowCount: number;
     totalCost: string; evidenceRef: string;
@@ -431,33 +520,31 @@ export class TotvsFleetLaborSourceService {
           run.unitId !== USINA_ASPHALT_TEAM_CONTEXT.unitId) {
         throw new ConflictException('Lote inexistente ou nao preparado');
       }
-      const rows = await tx.totvsFleetLaborCost.findMany({ where: { syncRunId: runId, competence },
-        select: { id: true, competence: true, employeeKey: true, period: true,
-          totalGeneralRateado: true, cardinalityOk: true, ruleVersion: true } });
-      if (!rows.length || rows.some((row) => row.competence.getTime() !== competence.getTime() ||
-          !row.cardinalityOk || row.ruleVersion !== FLEET_LABOR_FORMULA_ID)) {
-        throw new ConflictException('Competencia ausente ou sem formula/cardinalidade reconciliada');
-      }
-      const actualTotal = rows.reduce((sum, row) => sum.plus(row.totalGeneralRateado),
-        new Prisma.Decimal(0));
-      if (run.sourceHash !== expected.sourceHash || rows.length !== expected.rowCount ||
-          !actualTotal.equals(total)) {
-        throw new ConflictException('Lote diverge da evidencia independente');
-      }
       const existing = await tx.totvsFleetLaborApproval.findUnique({ where: {
         companyId_unitId_competence_syncRunId: {
           companyId: run.companyId, unitId: run.unitId, competence, syncRunId: run.id,
         },
-      } });
+      }, include: { syncRun: true, reversal: { select: { id: true } } } });
       if (existing) {
-        const currentCount = await tx.totvsFleetLaborCost.count({
-          where: { approvalId: existing.id, isCurrent: true, active: true },
+        const intact = await verifyApprovedFleetLaborIntegrity(tx, existing, {
+          companyId: run.companyId, unitId: run.unitId,
+          queryCode: FLEET_LABOR_QUERY_CODE, ruleVersion: FLEET_LABOR_FORMULA_ID,
         });
-        if (currentCount !== rows.length) {
+        if (!intact) {
           throw new ConflictException('Lote aprovado anteriormente, mas ja substituido');
         }
         return { approvalId: existing.id,
           competence: competence.toISOString().slice(0, 7), alreadyActive: true };
+      }
+      const parity = await this.evaluateParity(tx, runId, competence);
+      if (!parity.report.matching) {
+        throw new ConflictException(`Paridade 0025/0039 divergente: ${parity.report.issueCount} ocorrencias; consulte o relatorio do lote`);
+      }
+      const actualTotal = new Prisma.Decimal(parity.report.candidateTotal);
+      if (run.sourceHash !== expected.sourceHash ||
+          parity.report.candidateRows !== expected.rowCount ||
+          !actualTotal.equals(total)) {
+        throw new ConflictException('Lote diverge dos totais informados');
       }
       await tx.totvsFleetLaborCost.updateMany({
         where: { companyId: run.companyId, unitId: run.unitId, competence,
@@ -466,13 +553,59 @@ export class TotvsFleetLaborSourceService {
       });
       const approval = await tx.totvsFleetLaborApproval.create({ data: {
         companyId: run.companyId, unitId: run.unitId, competence, syncRunId: run.id,
-        sourceHash: run.sourceHash!, rowCount: rows.length, totalCost: actualTotal,
-        evidenceRef: expected.evidenceRef, approvedById,
+        sourceHash: run.sourceHash!, rowCount: parity.report.candidateRows,
+        totalCost: actualTotal, evidenceRef: expected.evidenceRef,
+        baselineSyncRunId: parity.baselineRun.id,
+        baselineHash: parity.report.baselineHash,
+        candidateHash: parity.candidateHash,
+        parityVerifiedAt: new Date(), approvedById,
       } });
-      await tx.totvsFleetLaborCost.updateMany({ where: { syncRunId: run.id, competence },
+      const applied = await tx.totvsFleetLaborCost.updateMany({
+        where: { syncRunId: run.id, competence, approvalId: null, isCurrent: false },
         data: { isCurrent: true, approvalId: approval.id } });
+      if (applied.count !== parity.report.candidateRows) {
+        throw new ConflictException('Lote alterado durante a ativacao');
+      }
       return { approvalId: approval.id, competence: competence.toISOString().slice(0, 7),
-        alreadyActive: false };
+        alreadyActive: false, baselineRunId: parity.baselineRun.id,
+        parityHash: parity.report.baselineHash };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60_000 });
+  }
+
+  async reverse(approvalId: string, reasonInput: string, reversedById?: string) {
+    if (process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED !== 'true') {
+      throw new ServiceUnavailableException('Reversao da fonte dedicada ainda nao liberada');
+    }
+    const reason = String(reasonInput || '').trim();
+    if (reason.length < 12 || reason.length > 500) {
+      throw new BadRequestException('Justificativa da reversao deve ter entre 12 e 500 caracteres');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const approval = await tx.totvsFleetLaborApproval.findUnique({
+        where: { id: approvalId }, include: { reversal: true },
+      });
+      if (!approval || approval.companyId !== USINA_ASPHALT_TEAM_CONTEXT.companyId ||
+          approval.unitId !== USINA_ASPHALT_TEAM_CONTEXT.unitId) {
+        throw new NotFoundException('Aprovacao de custos nao encontrada');
+      }
+      if (approval.reversal) return { approvalId, reversalId: approval.reversal.id,
+        alreadyReversed: true };
+      const latest = await tx.totvsFleetLaborApproval.findFirst({
+        where: { companyId: approval.companyId, unitId: approval.unitId,
+          competence: approval.competence },
+        orderBy: [{ approvedAt: 'desc' }, { id: 'desc' }], select: { id: true },
+      });
+      if (latest?.id !== approvalId) {
+        throw new ConflictException('Apenas a aprovacao vigente pode ser revertida');
+      }
+      const reversal = await tx.totvsFleetLaborReversal.create({ data: {
+        approvalId, reason, reversedById,
+      } });
+      await tx.totvsFleetLaborCost.updateMany({
+        where: { approvalId, isCurrent: true, active: true },
+        data: { isCurrent: false },
+      });
+      return { approvalId, reversalId: reversal.id, alreadyReversed: false };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
   }
 }

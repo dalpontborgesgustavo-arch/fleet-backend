@@ -29,9 +29,22 @@ CREATE TABLE "TotvsFleetLaborApproval" (
     "rowCount" INTEGER NOT NULL,
     "totalCost" DECIMAL(28,6) NOT NULL,
     "evidenceRef" TEXT NOT NULL,
+    "baselineSyncRunId" TEXT NOT NULL,
+    "baselineHash" TEXT NOT NULL,
+    "candidateHash" TEXT NOT NULL,
+    "parityVerifiedAt" TIMESTAMPTZ(6) NOT NULL,
     "approvedById" TEXT,
     "approvedAt" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "TotvsFleetLaborApproval_pkey" PRIMARY KEY ("id")
+);
+
+CREATE TABLE "TotvsFleetLaborReversal" (
+    "id" TEXT NOT NULL,
+    "approvalId" TEXT NOT NULL,
+    "reason" TEXT NOT NULL,
+    "reversedById" TEXT,
+    "reversedAt" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "TotvsFleetLaborReversal_pkey" PRIMARY KEY ("id")
 );
 
 CREATE TABLE "TotvsFleetLaborCost" (
@@ -61,6 +74,7 @@ CREATE INDEX "TotvsFleetLaborSyncRun_companyId_unitId_startedAt_idx" ON "TotvsFl
 CREATE INDEX "TotvsFleetLaborSyncRun_queryCode_status_startedAt_idx" ON "TotvsFleetLaborSyncRun"("queryCode", "status", "startedAt");
 CREATE UNIQUE INDEX "TotvsFleetLaborSyncRun_one_running_idx" ON "TotvsFleetLaborSyncRun"("companyId", "unitId", "queryCode") WHERE "status" = 'RUNNING';
 CREATE UNIQUE INDEX "TotvsFleetLaborApproval_companyId_unitId_competence_syncRunId_key" ON "TotvsFleetLaborApproval"("companyId", "unitId", "competence", "syncRunId");
+CREATE UNIQUE INDEX "TotvsFleetLaborReversal_approvalId_key" ON "TotvsFleetLaborReversal"("approvalId");
 CREATE INDEX "TotvsFleetLaborApproval_companyId_unitId_competence_approvedAt_idx" ON "TotvsFleetLaborApproval"("companyId", "unitId", "competence", "approvedAt");
 CREATE UNIQUE INDEX "TotvsFleetLaborCost_companyId_unitId_employeeKey_competence_period_syncRunId_key" ON "TotvsFleetLaborCost"("companyId", "unitId", "employeeKey", "competence", "period", "syncRunId");
 CREATE INDEX "TotvsFleetLaborCost_companyId_unitId_competence_isCurrent_active_idx" ON "TotvsFleetLaborCost"("companyId", "unitId", "competence", "isCurrent", "active");
@@ -70,20 +84,19 @@ CREATE INDEX "TotvsFleetLaborCost_approvalId_idx" ON "TotvsFleetLaborCost"("appr
 CREATE UNIQUE INDEX "TotvsFleetLaborCost_one_current_idx" ON "TotvsFleetLaborCost"("companyId", "unitId", "employeeKey", "competence", "period") WHERE "isCurrent" = true AND "active" = true;
 
 ALTER TABLE "TotvsFleetLaborApproval" ADD CONSTRAINT "TotvsFleetLaborApproval_syncRunId_fkey" FOREIGN KEY ("syncRunId") REFERENCES "TotvsFleetLaborSyncRun"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "TotvsFleetLaborApproval" ADD CONSTRAINT "TotvsFleetLaborApproval_baselineSyncRunId_fkey" FOREIGN KEY ("baselineSyncRunId") REFERENCES "TotvsEmployeeSyncRun"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "TotvsFleetLaborReversal" ADD CONSTRAINT "TotvsFleetLaborReversal_approvalId_fkey" FOREIGN KEY ("approvalId") REFERENCES "TotvsFleetLaborApproval"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE "TotvsFleetLaborCost" ADD CONSTRAINT "TotvsFleetLaborCost_syncRunId_fkey" FOREIGN KEY ("syncRunId") REFERENCES "TotvsFleetLaborSyncRun"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE "TotvsFleetLaborCost" ADD CONSTRAINT "TotvsFleetLaborCost_approvalId_fkey" FOREIGN KEY ("approvalId") REFERENCES "TotvsFleetLaborApproval"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- Approved facts cannot be silently edited or deleted. A later approved run
--- may only retire them by changing isCurrent from true to false.
+-- Source facts are append-only from staging onward. Approval may mark a staged
+-- fact current; replacement/reversal may only retire a current fact.
 CREATE FUNCTION "reject_approved_fleet_labor_fact_mutation"() RETURNS trigger AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN
-        IF OLD."approvalId" IS NOT NULL THEN
-            RAISE EXCEPTION 'Approved fleet labor facts are immutable';
-        END IF;
-        RETURN OLD;
+        RAISE EXCEPTION 'Fleet labor facts are immutable';
     END IF;
-    IF OLD."approvalId" IS NOT NULL AND (
+    IF (
         NEW."companyId" IS DISTINCT FROM OLD."companyId" OR
         NEW."unitId" IS DISTINCT FROM OLD."unitId" OR
         NEW."queryCode" IS DISTINCT FROM OLD."queryCode" OR
@@ -97,11 +110,16 @@ BEGIN
         NEW."cardinalityOk" IS DISTINCT FROM OLD."cardinalityOk" OR
         NEW."contentHash" IS DISTINCT FROM OLD."contentHash" OR
         NEW."syncRunId" IS DISTINCT FROM OLD."syncRunId" OR
-        NEW."approvalId" IS DISTINCT FROM OLD."approvalId" OR
         NEW."active" IS DISTINCT FROM OLD."active" OR
-        (OLD."isCurrent" = false AND NEW."isCurrent" = true)
+        (OLD."approvalId" IS NOT NULL AND NEW."approvalId" IS DISTINCT FROM OLD."approvalId") OR
+        (OLD."approvalId" IS NULL AND NEW."approvalId" IS NOT NULL AND
+          (OLD."isCurrent" OR NOT NEW."isCurrent")) OR
+        (OLD."approvalId" IS NULL AND NEW."approvalId" IS NULL AND
+          NEW."isCurrent" IS DISTINCT FROM OLD."isCurrent") OR
+        (OLD."isCurrent" = false AND NEW."isCurrent" = true AND
+          OLD."approvalId" IS NOT NULL)
     ) THEN
-        RAISE EXCEPTION 'Approved fleet labor facts are immutable';
+        RAISE EXCEPTION 'Fleet labor facts are immutable';
     END IF;
     RETURN NEW;
 END;
@@ -121,3 +139,29 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER "TotvsFleetLaborApproval_immutable"
 BEFORE UPDATE OR DELETE ON "TotvsFleetLaborApproval"
 FOR EACH ROW EXECUTE FUNCTION "reject_fleet_labor_approval_mutation"();
+
+CREATE FUNCTION "reject_fleet_labor_run_mutation"() RETURNS trigger AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'Fleet labor runs are immutable';
+    END IF;
+    IF OLD."status" IN ('STAGED', 'UNCHANGED', 'FAILED') THEN
+        RAISE EXCEPTION 'Completed fleet labor runs are immutable';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "TotvsFleetLaborSyncRun_completed_immutable"
+BEFORE UPDATE OR DELETE ON "TotvsFleetLaborSyncRun"
+FOR EACH ROW EXECUTE FUNCTION "reject_fleet_labor_run_mutation"();
+
+CREATE FUNCTION "reject_fleet_labor_reversal_mutation"() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'Fleet labor reversal receipts are immutable';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "TotvsFleetLaborReversal_immutable"
+BEFORE UPDATE OR DELETE ON "TotvsFleetLaborReversal"
+FOR EACH ROW EXECUTE FUNCTION "reject_fleet_labor_reversal_mutation"();

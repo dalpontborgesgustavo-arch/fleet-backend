@@ -1,6 +1,10 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { getLucasFleetRosterMonth } from './lucas-fleet-roster.controller';
 import { getLucasFleetGroupLaborActuals } from './lucas-fleet-labor-actuals';
+import { Prisma } from '@prisma/client';
+import { normalizeFleetLaborRows } from './totvs-fleet-labor-source.service';
+import { compareFleetLaborParity, fingerprint0025Aggregate,
+  fingerprintFleetLaborFacts } from './fleet-labor-integrity';
 
 jest.mock('./lucas-fleet-roster.controller', () => ({
   getLucasFleetRosterMonth: jest.fn(),
@@ -24,6 +28,9 @@ function setup(subgroup = 'CARROS FROTA JR') {
     checklist: { findMany: jest.fn() },
     fleetResultMonthlyWorkforce: { findMany: jest.fn().mockResolvedValue([]) },
     totvsFleetLaborApproval: { findFirst: jest.fn().mockResolvedValue(null) },
+    totvsEmployeeSyncRun: { findUnique: jest.fn().mockResolvedValue({
+      status: 'SUCCEEDED', rejectedRows: 0,
+    }) },
     totvsFleetLaborCost: { count: jest.fn().mockResolvedValue(0),
       aggregate: jest.fn().mockResolvedValue({ _sum: { totalGeneralRateado: null } }),
       findMany: jest.fn().mockResolvedValue([]) },
@@ -225,24 +232,46 @@ describe('mao de obra da frota com ultimo vinculo mensal', () => {
   it('usa somente a fonte dedicada apos aprovacao integra', async () => {
     const prisma = setup();
     prisma.checklist.findMany.mockResolvedValueOnce([current('1-1')]);
+    const prepared = normalizeFleetLaborRows([{
+      CODCOLIGADA: '1', CHAPA: '1', FK_FUNCIONARIO: '1-1',
+      DT_MES: '2026-10-01', NROPERIODO: 20,
+      TOTAL_GERAL_RATEADO: '123.45', CARDINALIDADE_OK: 1,
+      FORMULA_ID: 'IND.BI.0025_RATEADO_V1',
+    }]).rows[0];
+    const fact = { ...prepared, companyId: 'JR_CONSTRUCOES',
+      unitId: 'USINA_ASFALTO_ICARA', queryCode: 'IND.BI.0039',
+      ruleVersion: 'IND.BI.0025_RATEADO_V1', syncRunId: 'run-1',
+      active: true, isCurrent: true, approvalId: 'approval-1' };
+    const fingerprint = fingerprintFleetLaborFacts([fact], {
+      companyId: fact.companyId, unitId: fact.unitId, queryCode: fact.queryCode,
+      ruleVersion: fact.ruleVersion, syncRunId: fact.syncRunId,
+    });
+    const source = { companyCode: '1', employeeNumber: '1', employeeKey: '1-1',
+      competence: fact.competence, period: 20, totalGeneralLine: new Prisma.Decimal('123.45'),
+      sourceRows: 1, allocationRows: 0, fixedAllocationValue: null,
+      allocationClosed: false, officialCostEligible: false,
+      pendingReason: 'PFRATEIOFIXO_CARDINALIDADE_NAO_RECONCILIADA',
+      contentHash: '', syncRunId: 'baseline-row-run',
+      syncRun: { status: 'SUCCEEDED', rejectedRows: 0 } };
+    const baseline = { ...source, contentHash: fingerprint0025Aggregate(source) };
+    const parity = compareFleetLaborParity(fingerprint.entries, [baseline]);
     prisma.totvsFleetLaborApproval.findFirst.mockResolvedValueOnce({
-      id: 'approval-1', rowCount: 1, sourceHash: 'hash', totalCost: '123.45',
-      syncRun: { status: 'STAGED', sourceHash: 'hash', queryCode: 'IND.BI.0039',
+      id: 'approval-1', competence: fact.competence, syncRunId: 'run-1',
+      baselineSyncRunId: 'baseline-run', baselineHash: parity.baselineHash,
+      candidateHash: fingerprint.sourceHash,
+      rowCount: 1, sourceHash: fingerprint.sourceHash, totalCost: new Prisma.Decimal('123.45'),
+      syncRun: { status: 'STAGED', sourceHash: fingerprint.sourceHash, queryCode: 'IND.BI.0039',
         ruleVersion: 'IND.BI.0025_RATEADO_V1' },
     });
-    prisma.totvsFleetLaborCost.count.mockResolvedValue(1);
-    prisma.totvsFleetLaborCost.aggregate.mockResolvedValueOnce({
-      _sum: { totalGeneralRateado: { equals: (value: unknown) => value === '123.45' } },
-    });
-    prisma.totvsFleetLaborCost.findMany.mockResolvedValueOnce([
-      { employeeKey: '1-1', totalGeneralRateado: '123.45' },
-    ]);
+    prisma.totvsEmployeeCostAggregate.findMany.mockResolvedValueOnce([baseline]);
+    prisma.totvsFleetLaborCost.findMany.mockResolvedValueOnce([fact])
+      .mockResolvedValueOnce([{ employeeKey: '1-1', totalGeneralRateado: '123.45' }]);
     const result = await getLucasFleetGroupLaborActuals(prisma as unknown as PrismaService, '2026-10');
     expect(result.groupLaborActuals[0]).toMatchObject({
       laborActual: '123.450000', isPartial: false, isProvisional: false,
       costSource: 'OFFICIAL_DEDICATED', costStatus: 'OFFICIAL',
     });
-    expect(prisma.totvsEmployeeCostAggregate.findMany).not.toHaveBeenCalled();
+    expect(prisma.totvsEmployeeCostAggregate.findMany).toHaveBeenCalledTimes(1);
   });
 
   it('falha fechado se a aprovacao dedicada perder linhas correntes', async () => {
@@ -259,7 +288,7 @@ describe('mao de obra da frota com ultimo vinculo mensal', () => {
       laborActual: null, isPartial: true,
       costSource: 'DEDICATED_INTEGRITY_ERROR', costStatus: 'SOURCE_INTEGRITY_ERROR',
     });
-    expect(prisma.totvsEmployeeCostAggregate.findMany).not.toHaveBeenCalled();
+    expect(prisma.totvsEmployeeCostAggregate.findMany).toHaveBeenCalledTimes(1);
   });
 
   it('mostra o subtotal de uma frota mesmo que outra do grupo nunca tenha checklist', async () => {

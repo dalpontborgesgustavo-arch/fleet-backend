@@ -3002,6 +3002,7 @@ model TotvsEmployeeSyncRun {
   updatedAt         DateTime                     @updatedAt @db.Timestamptz(6)
   employeeSnapshots TotvsEmployeeSnapshot[]
   costAggregates    TotvsEmployeeCostAggregate[]
+  fleetLaborParityApprovals TotvsFleetLaborApproval[]
 
   @@index([companyId, unitId, startedAt])
   @@index([queryCode, status, startedAt])
@@ -3111,13 +3112,28 @@ model TotvsFleetLaborApproval {
   rowCount      Int
   totalCost     Decimal                 @db.Decimal(28, 6)
   evidenceRef   String
+  baselineSyncRunId String
+  baselineHash String
+  candidateHash String
+  parityVerifiedAt DateTime @db.Timestamptz(6)
   approvedById  String?
   approvedAt    DateTime                @default(now()) @db.Timestamptz(6)
   syncRun       TotvsFleetLaborSyncRun  @relation(fields: [syncRunId], references: [id], onDelete: Restrict)
+  baselineSyncRun TotvsEmployeeSyncRun @relation(fields: [baselineSyncRunId], references: [id], onDelete: Restrict)
   rows          TotvsFleetLaborCost[]
+  reversal      TotvsFleetLaborReversal?
 
   @@unique([companyId, unitId, competence, syncRunId])
   @@index([companyId, unitId, competence, approvedAt])
+}
+
+model TotvsFleetLaborReversal {
+  id           String @id @default(uuid())
+  approvalId   String @unique
+  reason       String
+  reversedById String?
+  reversedAt   DateTime @default(now()) @db.Timestamptz(6)
+  approval     TotvsFleetLaborApproval @relation(fields: [approvalId], references: [id], onDelete: Restrict)
 }
 
 model TotvsFleetLaborCost {

@@ -4,6 +4,7 @@ import { USINA_ASPHALT_TEAM_CONTEXT } from '../usina-asphalt-teams/usina-asphalt
 import { getLucasFleetRosterMonth } from './lucas-fleet-roster.controller';
 import { isSelectableTotvsEmployee, monthlyWorkforceKind, parseMonthlyLaborAssignments } from '../checklist/monthly-workforce.rules';
 import { FLEET_LABOR_FORMULA_ID, FLEET_LABOR_QUERY_CODE } from './totvs-fleet-labor-source.service';
+import { verifyApprovedFleetLaborIntegrity } from './fleet-labor-integrity';
 
 type MissingLaborLink = {
   vehicleId: string;
@@ -206,36 +207,20 @@ export async function getLucasFleetGroupLaborActuals(
     where: { companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
       unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId, competence: month },
     orderBy: [{ approvedAt: 'desc' }, { id: 'desc' }],
-    select: { id: true, rowCount: true, sourceHash: true, totalCost: true,
+    select: { id: true, competence: true, syncRunId: true,
+      baselineSyncRunId: true, baselineHash: true, candidateHash: true,
+      rowCount: true, sourceHash: true, totalCost: true,
+      reversal: { select: { id: true } },
       syncRun: { select: { status: true, sourceHash: true, ruleVersion: true,
         queryCode: true } } },
   });
   // Never blend an approved dedicated source with provisional IND.BI.0025 rows.
-  const [approvalRowsCount, dedicatedCount, dedicatedSum] = approval ? await Promise.all([
-    prisma.totvsFleetLaborCost.count({ where: { approvalId: approval.id } }),
-    prisma.totvsFleetLaborCost.count({
-      where: { approvalId: approval.id, competence: month,
-        companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
-        unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
-        isCurrent: true, active: true, queryCode: FLEET_LABOR_QUERY_CODE,
-        ruleVersion: FLEET_LABOR_FORMULA_ID, cardinalityOk: true },
-    }),
-    prisma.totvsFleetLaborCost.aggregate({
-      where: { approvalId: approval.id, competence: month,
-        companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
-        unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
-        isCurrent: true, active: true, queryCode: FLEET_LABOR_QUERY_CODE,
-        ruleVersion: FLEET_LABOR_FORMULA_ID, cardinalityOk: true },
-      _sum: { totalGeneralRateado: true },
-    }),
-  ]) : [0, 0, null];
-  const sourceIntegrityError = Boolean(approval && (approval.rowCount !== dedicatedCount ||
-    approvalRowsCount !== dedicatedCount ||
-    !dedicatedSum?._sum.totalGeneralRateado?.equals(approval.totalCost) ||
-    approval.syncRun.queryCode !== FLEET_LABOR_QUERY_CODE ||
-    approval.syncRun.status !== 'STAGED' ||
-    approval.syncRun.ruleVersion !== FLEET_LABOR_FORMULA_ID ||
-    approval.sourceHash !== approval.syncRun.sourceHash));
+  const sourceIntegrityError = Boolean(approval &&
+    !(await verifyApprovedFleetLaborIntegrity(prisma, approval, {
+      companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+      unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+      queryCode: FLEET_LABOR_QUERY_CODE, ruleVersion: FLEET_LABOR_FORMULA_ID,
+    })));
   const dedicated = approval && !sourceIntegrityError && keys.length
     ? await prisma.totvsFleetLaborCost.findMany({
       where: { approvalId: approval.id, competence: month, employeeKey: { in: keys },
