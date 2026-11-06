@@ -111,6 +111,212 @@ export function fingerprint0025Manifest(
   return { rowCount: entries.length, contentHash: digest(entries), entries };
 }
 
+function valid0025CostRow(row: FleetLaborBaselineRow, competence: Date) {
+  const month = row.competence.toISOString().slice(0, 10);
+  return (
+    row.competence.getTime() === competence.getTime() &&
+    Boolean(row.companyCode && row.employeeNumber) &&
+    row.employeeKey === `${row.companyCode}-${row.employeeNumber}` &&
+    month.endsWith('-01') &&
+    [20, 30, 40].includes(row.period) &&
+    (row.period !== 30 || row.competence.getUTCMonth() === 10) &&
+    (row.period !== 40 || row.competence.getUTCMonth() === 11) &&
+    row.sourceRows >= 1 &&
+    row.syncRun.status === 'SUCCEEDED' &&
+    row.syncRun.rejectedRows === 0 &&
+    row.contentHash === fingerprint0025Aggregate(row)
+  );
+}
+
+/**
+ * JR designates the current IND.BI.0025 rateio as the canonical fleet labor
+ * cost. Verify the latest monthly capture against every current aggregate
+ * before letting Resultados Frota consume any of its rows. The legacy
+ * `officialCostEligible` flag belongs to a different reconciliation workflow.
+ */
+export async function verifiedCurrentFleetLabor0025(
+  db: PrismaService,
+  competence: Date,
+  scope: { companyId: string; unitId: string },
+  now = new Date(),
+) {
+  const [latestRun, currentRows, manifest] = await Promise.all([
+    db.totvsEmployeeSyncRun.findFirst({
+      where: {
+        companyId: scope.companyId,
+        unitId: scope.unitId,
+        queryCode: 'IND.BI.0025',
+        contextCode: '0/P',
+      },
+      orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        status: true,
+        contextCode: true,
+        rejectedRows: true,
+        finishedAt: true,
+      },
+    }),
+    db.totvsEmployeeCostAggregate.findMany({
+      where: {
+        companyId: scope.companyId,
+        unitId: scope.unitId,
+        source: 'TOTVS_RM',
+        queryCode: 'IND.BI.0025',
+        competence,
+        isCurrent: true,
+        active: true,
+      },
+      select: {
+        id: true,
+        companyCode: true,
+        employeeNumber: true,
+        employeeKey: true,
+        competence: true,
+        period: true,
+        totalGeneralLine: true,
+        contentHash: true,
+        sourceRows: true,
+        allocationRows: true,
+        fixedAllocationValue: true,
+        allocationClosed: true,
+        officialCostEligible: true,
+        pendingReason: true,
+        syncRunId: true,
+        syncRun: { select: { status: true, rejectedRows: true } },
+      },
+    }),
+    db.totvsEmployeeCostRunManifest.findFirst({
+      where: {
+        competence,
+        syncRun: {
+          is: {
+            companyId: scope.companyId,
+            unitId: scope.unitId,
+            queryCode: 'IND.BI.0025',
+            contextCode: '0/P',
+          },
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: {
+        syncRunId: true,
+        rowCount: true,
+        contentHash: true,
+        syncRun: {
+          select: {
+            status: true,
+            contextCode: true,
+            rejectedRows: true,
+            finishedAt: true,
+          },
+        },
+        memberships: {
+          select: {
+            aggregate: {
+              select: {
+                id: true,
+                companyCode: true,
+                employeeNumber: true,
+                employeeKey: true,
+                competence: true,
+                period: true,
+                totalGeneralLine: true,
+                contentHash: true,
+                sourceRows: true,
+                allocationRows: true,
+                fixedAllocationValue: true,
+                allocationClosed: true,
+                officialCostEligible: true,
+                pendingReason: true,
+                syncRunId: true,
+                isCurrent: true,
+                active: true,
+                syncRun: { select: { status: true, rejectedRows: true } },
+              },
+            },
+          },
+        },
+      },
+    }),
+  ]);
+  const unavailable = {
+    ready: false as const,
+    historicalProvisional: false,
+    rows: [] as typeof currentRows,
+  };
+  const firstOfCurrentMonth = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    1,
+  );
+  const recentCutoff = new Date(firstOfCurrentMonth);
+  recentCutoff.setUTCMonth(recentCutoff.getUTCMonth() - 2);
+  const isRecent = competence >= recentCutoff;
+  if (competence.getTime() >= firstOfCurrentMonth) return unavailable;
+  // Before manifests existed, older months were already displayed as
+  // provisional 0025 figures. Preserve that historical report, but never
+  // elevate it to official or use this fallback for recent/open months.
+  if (!manifest && !isRecent && currentRows.length) {
+    try {
+      fingerprint0025Manifest(currentRows);
+      if (currentRows.every((row) => valid0025CostRow(row, competence))) {
+        return {
+          ready: false as const,
+          historicalProvisional: true,
+          rows: currentRows,
+        };
+      }
+    } catch {
+      // Invalid or duplicated historical data must remain unavailable.
+    }
+  }
+  if (
+    !manifest ||
+    manifest.syncRun.status !== 'SUCCEEDED' ||
+    manifest.syncRun.contextCode !== '0/P' ||
+    manifest.syncRun.rejectedRows !== 0 ||
+    !manifest.syncRun.finishedAt ||
+    !currentRows.length
+  )
+    return unavailable;
+
+  // Recent closed competences must be refreshed by the daily 0025 job. Older
+  // closed months remain valid only while the manifest still matches current
+  // rows; they are not expected in each new two-month source capture.
+  if (
+    isRecent &&
+    (!latestRun ||
+      manifest.syncRunId !== latestRun.id ||
+      now.getTime() - manifest.syncRun.finishedAt.getTime() >
+        36 * 60 * 60_000 ||
+      manifest.syncRun.finishedAt.getTime() - now.getTime() > 5 * 60_000)
+  )
+    return unavailable;
+  if (manifest.rowCount !== currentRows.length) return unavailable;
+  const observed = manifest.memberships.map((item) => item.aggregate);
+  if (observed.length !== currentRows.length) return unavailable;
+  try {
+    const fingerprint = fingerprint0025Manifest(observed);
+    if (fingerprint.contentHash !== manifest.contentHash) return unavailable;
+  } catch {
+    return unavailable;
+  }
+  const currentIds = currentRows.map((row) => row.id).sort();
+  const observedIds = observed.map((row) => row.id).sort();
+  if (observedIds.some((id, index) => id !== currentIds[index]))
+    return unavailable;
+  for (const row of observed) {
+    if (!row.isCurrent || !row.active || !valid0025CostRow(row, competence))
+      return unavailable;
+  }
+  return {
+    ready: true as const,
+    historicalProvisional: false,
+    rows: currentRows,
+  };
+}
+
 /** Rebuild the exact canonical hash used at staging, independent of stored hashes. */
 export function fingerprintFleetLaborFacts(
   rows: FleetLaborFact[],

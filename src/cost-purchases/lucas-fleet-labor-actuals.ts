@@ -7,11 +7,7 @@ import {
   monthlyWorkforceKind,
   parseMonthlyLaborAssignments,
 } from '../checklist/monthly-workforce.rules';
-import {
-  FLEET_LABOR_FORMULA_ID,
-  FLEET_LABOR_QUERY_CODE,
-} from './totvs-fleet-labor-source.service';
-import { verifyApprovedFleetLaborIntegrity } from './fleet-labor-integrity';
+import { verifiedCurrentFleetLabor0025 } from './fleet-labor-integrity';
 
 type MissingLaborLink = {
   vehicleId: string;
@@ -299,86 +295,15 @@ export async function getLucasFleetGroupLaborActuals(
     }
   }
   const keys = [...keyGroups.keys()];
-  const approval = await prisma.totvsFleetLaborApproval.findFirst({
-    where: {
-      companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
-      unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
-      competence: month,
-    },
-    orderBy: [{ approvedAt: 'desc' }, { id: 'desc' }],
-    select: {
-      id: true,
-      competence: true,
-      syncRunId: true,
-      baselineSyncRunId: true,
-      baselineHash: true,
-      candidateHash: true,
-      parityVerifiedAt: true,
-      rowCount: true,
-      sourceHash: true,
-      totalCost: true,
-      reversal: { select: { id: true } },
-      syncRun: {
-        select: {
-          status: true,
-          sourceHash: true,
-          ruleVersion: true,
-          queryCode: true,
-          companyId: true,
-          unitId: true,
-          finishedAt: true,
-        },
-      },
-    },
+  // For this dashboard JR designated IND.BI.0025 itself as the canonical
+  // rateio. IND.BI.0039 approvals are audit-only and must never override it.
+  const source = await verifiedCurrentFleetLabor0025(prisma, month, {
+    companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+    unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
   });
-  // Never blend an approved dedicated source with provisional IND.BI.0025 rows.
-  const sourceReversed = Boolean(approval?.reversal);
-  const sourceIntegrityError = Boolean(
-    approval &&
-    !sourceReversed &&
-    !(await verifyApprovedFleetLaborIntegrity(prisma, approval, {
-      companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
-      unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
-      queryCode: FLEET_LABOR_QUERY_CODE,
-      ruleVersion: FLEET_LABOR_FORMULA_ID,
-    })),
-  );
-  const dedicated =
-    approval && !sourceReversed && !sourceIntegrityError && keys.length
-      ? await prisma.totvsFleetLaborCost.findMany({
-          where: {
-            approvalId: approval.id,
-            competence: month,
-            employeeKey: { in: keys },
-            isCurrent: true,
-            active: true,
-            cardinalityOk: true,
-            queryCode: FLEET_LABOR_QUERY_CODE,
-            ruleVersion: FLEET_LABOR_FORMULA_ID,
-          },
-          select: { employeeKey: true, totalGeneralRateado: true },
-        })
-      : [];
-  const provisional =
-    !approval && keys.length
-      ? await prisma.totvsEmployeeCostAggregate.findMany({
-          where: {
-            companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
-            unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
-            queryCode: 'IND.BI.0025',
-            competence: month,
-            employeeKey: { in: keys },
-            isCurrent: true,
-            active: true,
-          },
-          select: {
-            employeeKey: true,
-            totalGeneralLine: true,
-            officialCostEligible: true,
-            syncRun: { select: { status: true, rejectedRows: true } },
-          },
-        })
-      : [];
+  const sourceIntegrityError = !source.ready && !source.historicalProvisional;
+  const keySet = new Set(keys);
+  const sourceRows = source.rows.filter((row) => keySet.has(row.employeeKey));
   const keysToValidate = [
     ...new Set(validationReferences.map((reference) => reference.key)),
   ];
@@ -420,24 +345,12 @@ export async function getLucasFleetGroupLaborActuals(
     {
       employeeKey: string;
       amount: Prisma.Decimal | null;
-      sourceOk: boolean;
-      provisional: boolean;
     }[]
   >();
-  const costRows = approval
-    ? dedicated.map((row) => ({
-        employeeKey: row.employeeKey,
-        amount: row.totalGeneralRateado,
-        sourceOk: true,
-        provisional: false,
-      }))
-    : provisional.map((row) => ({
-        employeeKey: row.employeeKey,
-        amount: row.totalGeneralLine,
-        sourceOk:
-          row.syncRun.status === 'SUCCEEDED' && row.syncRun.rejectedRows === 0,
-        provisional: !row.officialCostEligible,
-      }));
+  const costRows = sourceRows.map((row) => ({
+    employeeKey: row.employeeKey,
+    amount: row.totalGeneralLine,
+  }));
   for (const row of costRows) {
     costs.set(row.employeeKey, [...(costs.get(row.employeeKey) || []), row]);
   }
@@ -445,14 +358,10 @@ export async function getLucasFleetGroupLaborActuals(
   const groupLaborActuals = [...groups].map(([groupKey, group]) => {
     // No linked employee is unknown coverage, not a proven monetary zero.
     let complete =
-      group.complete &&
-      group.keys.size > 0 &&
-      !sourceReversed &&
-      !sourceIntegrityError;
+      group.complete && group.keys.size > 0 && !sourceIntegrityError;
     let amount = new Decimal(0);
     let valuedEmployeeCount = 0;
     let missingCostEmployeeCount = 0;
-    let hasProvisionalRows = false;
     for (const key of group.keys) {
       if ((keyGroups.get(key)?.size || 0) > 1) {
         complete = false;
@@ -463,16 +372,12 @@ export async function getLucasFleetGroupLaborActuals(
         continue;
       }
       const rows = costs.get(key) || [];
-      if (
-        !rows.length ||
-        rows.some((row) => row.amount === null || !row.sourceOk)
-      ) {
+      if (!rows.length || rows.some((row) => row.amount === null)) {
         complete = false;
         missingCostEmployeeCount += 1;
         continue;
       }
       valuedEmployeeCount += 1;
-      if (rows.some((row) => row.provisional)) hasProvisionalRows = true;
       for (const row of rows) amount = amount.plus(row.amount!.toString());
     }
     const missingVehicleCount = new Set(
@@ -481,27 +386,21 @@ export async function getLucasFleetGroupLaborActuals(
     return {
       groupKey,
       laborActual:
-        valuedEmployeeCount && !sourceReversed && !sourceIntegrityError
-          ? amount.toFixed(6)
-          : null,
+        valuedEmployeeCount && !sourceIntegrityError ? amount.toFixed(6) : null,
       isPartial: !complete,
-      isProvisional: !approval || hasProvisionalRows,
-      costSource: sourceReversed
-        ? 'DEDICATED_REVERSED'
-        : sourceIntegrityError
-          ? 'DEDICATED_INTEGRITY_ERROR'
-          : approval
-            ? 'OFFICIAL_DEDICATED'
-            : 'PROVISIONAL_SHARED',
-      costStatus: sourceReversed
-        ? 'REVERSED'
-        : sourceIntegrityError
-          ? 'SOURCE_INTEGRITY_ERROR'
-          : missingCostEmployeeCount
-            ? 'MISSING_SOURCE'
-            : approval
-              ? 'OFFICIAL'
-              : 'PROVISIONAL',
+      isProvisional: source.historicalProvisional,
+      costSource: sourceIntegrityError
+        ? 'SOURCE_INTEGRITY_ERROR'
+        : source.historicalProvisional
+          ? 'PROVISIONAL_SHARED'
+          : 'OFFICIAL_0025',
+      costStatus: sourceIntegrityError
+        ? 'SOURCE_INTEGRITY_ERROR'
+        : missingCostEmployeeCount
+          ? 'MISSING_SOURCE'
+          : source.historicalProvisional
+            ? 'PROVISIONAL'
+            : 'OFFICIAL',
       vehicleCount: group.vehicleIds.length,
       employeeCount: group.keys.size,
       valuedEmployeeCount,

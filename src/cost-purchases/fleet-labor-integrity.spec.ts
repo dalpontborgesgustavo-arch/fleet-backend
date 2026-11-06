@@ -6,6 +6,7 @@ import {
   fingerprint0025Manifest,
   fingerprintFleetLaborFacts,
   verifyApprovedFleetLaborIntegrity,
+  verifiedCurrentFleetLabor0025,
 } from './fleet-labor-integrity';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -213,5 +214,145 @@ describe('paridade canonica de mao de obra', () => {
         scope,
       ),
     ).toBe(false);
+  });
+});
+
+describe('fonte oficial 0025 de Resultados Frota', () => {
+  const competence = new Date('2026-10-01T00:00:00.000Z');
+  const now = new Date('2026-11-06T12:00:00.000Z');
+  const scope0025 = { companyId: scope.companyId, unitId: scope.unitId };
+  const row = baseline(fact('001', '100.00'));
+  const acceptedManifest = {
+    syncRunId: 'latest-0025',
+    rowCount: 1,
+    contentHash: fingerprint0025Manifest([row]).contentHash,
+    syncRun: {
+      status: 'SUCCEEDED',
+      contextCode: '0/P',
+      rejectedRows: 0,
+      finishedAt: now,
+    },
+    memberships: [{ aggregate: row }],
+  };
+  function db(
+    manifest = acceptedManifest,
+    rows = [row],
+    latestId = 'latest-0025',
+  ) {
+    return {
+      totvsEmployeeSyncRun: {
+        findFirst: jest.fn().mockResolvedValue({ id: latestId }),
+      },
+      totvsEmployeeCostAggregate: {
+        findMany: jest.fn().mockResolvedValue(rows),
+      },
+      totvsEmployeeCostRunManifest: {
+        findFirst: jest.fn().mockResolvedValue(manifest),
+      },
+    };
+  }
+
+  it('aceita somente a captura recente cujo manifesto corresponde aos agregados', async () => {
+    const prisma = db();
+    const result = await verifiedCurrentFleetLabor0025(
+      prisma as unknown as PrismaService,
+      competence,
+      scope0025,
+      now,
+    );
+    expect(result).toMatchObject({ ready: true, rows: [row] });
+  });
+
+  it('nao usa manifesto antigo depois que uma nova captura 0025 conclui', async () => {
+    const prisma = db(acceptedManifest, [row], 'newer-0025');
+    const result = await verifiedCurrentFleetLabor0025(
+      prisma as unknown as PrismaService,
+      competence,
+      scope0025,
+      now,
+    );
+    expect(result).toMatchObject({ ready: false, rows: [] });
+  });
+
+  it('invalida valor alterado mesmo se os IDs e o manifesto forem iguais', async () => {
+    const tampered = { ...row, totalGeneralLine: new Prisma.Decimal('101.00') };
+    const prisma = db(
+      { ...acceptedManifest, memberships: [{ aggregate: tampered }] },
+      [tampered],
+    );
+    const result = await verifiedCurrentFleetLabor0025(
+      prisma as unknown as PrismaService,
+      competence,
+      scope0025,
+      now,
+    );
+    expect(result).toMatchObject({ ready: false, rows: [] });
+  });
+
+  it('nao declara mes corrente sem manifesto de folha fechada como oficial', async () => {
+    const prisma = db();
+    prisma.totvsEmployeeCostRunManifest.findFirst.mockResolvedValueOnce(null);
+    const result = await verifiedCurrentFleetLabor0025(
+      prisma as unknown as PrismaService,
+      new Date('2026-11-01T00:00:00.000Z'),
+      scope0025,
+      now,
+    );
+    expect(result).toMatchObject({ ready: false, rows: [] });
+  });
+
+  it('nunca declara folha ainda aberta oficial, mesmo com manifesto inesperado', async () => {
+    const open = {
+      ...row,
+      competence: new Date('2026-11-01T00:00:00.000Z'),
+      contentHash: '',
+    };
+    open.contentHash = fingerprint0025Aggregate(open);
+    const prisma = db(
+      {
+        ...acceptedManifest,
+        contentHash: fingerprint0025Manifest([open]).contentHash,
+        memberships: [{ aggregate: open }],
+      },
+      [open],
+    );
+    const result = await verifiedCurrentFleetLabor0025(
+      prisma as unknown as PrismaService,
+      open.competence,
+      scope0025,
+      now,
+    );
+    expect(result).toMatchObject({ ready: false, rows: [] });
+  });
+
+  it('preserva mes historico anterior aos manifestos somente como provisório', async () => {
+    const prisma = db();
+    prisma.totvsEmployeeCostRunManifest.findFirst.mockResolvedValueOnce(null);
+    const result = await verifiedCurrentFleetLabor0025(
+      prisma as unknown as PrismaService,
+      competence,
+      scope0025,
+      new Date('2027-01-06T12:00:00.000Z'),
+    );
+    expect(result).toMatchObject({
+      ready: false,
+      historicalProvisional: true,
+      rows: [row],
+    });
+  });
+
+  it('nao usa captura anterior se a ultima tentativa recente falhou', async () => {
+    const prisma = db();
+    prisma.totvsEmployeeSyncRun.findFirst.mockResolvedValueOnce({
+      id: 'failed-run',
+    });
+    const result = await verifiedCurrentFleetLabor0025(
+      prisma as unknown as PrismaService,
+      competence,
+      scope0025,
+      now,
+    );
+    expect(result.ready).toBe(false);
+    expect(result.rows).toHaveLength(0);
   });
 });
