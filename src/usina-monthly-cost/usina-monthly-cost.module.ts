@@ -12,6 +12,8 @@ import { UsinaMonthlyStonePowderFreightController } from './usina-monthly-stone-
 import { UsinaMonthlyStonePowderFreightService } from './usina-monthly-stone-powder-freight.service';
 import { FleetResultMonthlySettingsController } from './fleet-result-monthly-settings.controller';
 import { FleetResultMonthlySettingsService } from './fleet-result-monthly-settings.service';
+import { FleetResultMonthlyWorkforceController } from './fleet-result-monthly-workforce.controller';
+import { FleetResultMonthlyWorkforceService } from './fleet-result-monthly-workforce.service';
 
 @Module({
   imports: [PrismaModule, AuthModule],
@@ -21,6 +23,7 @@ import { FleetResultMonthlySettingsService } from './fleet-result-monthly-settin
     UsinaMonthlyResultTargetController,
     UsinaMonthlyStonePowderFreightController,
     FleetResultMonthlySettingsController,
+    FleetResultMonthlyWorkforceController,
   ],
   providers: [
     UsinaMonthlyCostService,
@@ -28,6 +31,7 @@ import { FleetResultMonthlySettingsService } from './fleet-result-monthly-settin
     UsinaMonthlyResultTargetService,
     UsinaMonthlyStonePowderFreightService,
     FleetResultMonthlySettingsService,
+    FleetResultMonthlyWorkforceService,
     UsinaMonthlyCostAccessGuard,
   ],
 })

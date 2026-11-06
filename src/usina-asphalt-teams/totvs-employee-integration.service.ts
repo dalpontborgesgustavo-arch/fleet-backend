@@ -7,10 +7,15 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { dateKey, parseDate, USINA_ASPHALT_TEAM_CONTEXT } from './usina-asphalt-teams.rules';
+import { fingerprint0025Manifest } from '../cost-purchases/fleet-labor-integrity';
+import {
+  dateKey,
+  parseDate,
+  USINA_ASPHALT_TEAM_CONTEXT,
+} from './usina-asphalt-teams.rules';
 
 const QUERY_CODE = 'IND.BI.0025';
 const SOURCE = 'TOTVS_RM';
@@ -52,6 +57,46 @@ function chunks<T>(values: T[], size = 500) {
   return result;
 }
 
+function missingVersionBatches(
+  groups: Map<string, NormalizedRow[]>,
+  currentKeys: Set<string>,
+) {
+  const scopes = new Map<
+    string,
+    { competence: Date; period: number; employeeKeys: Set<string> }
+  >();
+  for (const [key, rows] of groups) {
+    if (currentKeys.has(key)) continue;
+    const first = rows[0];
+    const scopeKey = `${dateKey(first.competence)}|${first.period}`;
+    const scope = scopes.get(scopeKey) || {
+      competence: first.competence,
+      period: first.period,
+      employeeKeys: new Set<string>(),
+    };
+    scope.employeeKeys.add(first.employeeKey);
+    scopes.set(scopeKey, scope);
+  }
+  return [...scopes.values()].flatMap((scope) =>
+    chunks([...scope.employeeKeys]).map((employeeKeys) => ({
+      competence: scope.competence,
+      period: scope.period,
+      employeeKeys,
+    })),
+  );
+}
+
+function recentClosedCompetences(now = new Date()) {
+  const currentMonth = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+  );
+  return [1, 2].map((monthsBack) => {
+    const value = new Date(currentMonth);
+    value.setUTCMonth(value.getUTCMonth() - monthsBack);
+    return value;
+  });
+}
+
 function text(row: SourceRow, ...keys: string[]) {
   for (const key of keys) {
     const value = row[key];
@@ -63,7 +108,8 @@ function text(row: SourceRow, ...keys: string[]) {
 }
 
 function decimal(value: unknown) {
-  if (value === null || value === undefined || String(value).trim() === '') return null;
+  if (value === null || value === undefined || String(value).trim() === '')
+    return null;
   const raw = String(value).trim();
   const normalized = raw.includes(',')
     ? raw.replace(/\./g, '').replace(',', '.')
@@ -73,12 +119,14 @@ function decimal(value: unknown) {
 }
 
 function sourceDate(value: unknown, field: string) {
-  if (value === null || value === undefined || String(value).trim() === '') return null;
+  if (value === null || value === undefined || String(value).trim() === '')
+    return null;
   const raw = String(value).trim();
   const iso = /^\d{4}-\d{2}-\d{2}/.exec(raw)?.[0];
   if (iso) return parseDate(iso, field);
   const brazilian = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(raw);
-  if (brazilian) return parseDate(`${brazilian[3]}-${brazilian[2]}-${brazilian[1]}`, field);
+  if (brazilian)
+    return parseDate(`${brazilian[3]}-${brazilian[2]}-${brazilian[1]}`, field);
   throw new BadRequestException(`${field} invalida no retorno da TOTVS`);
 }
 
@@ -92,25 +140,48 @@ export class TotvsEmployeeIntegrationService {
   constructor(private readonly prisma: PrismaService) {}
 
   private config() {
-    const baseUrl = String(process.env.TOTVS_RM_BASE_URL || '').trim().replace(/\/$/, '');
+    const baseUrl = String(process.env.TOTVS_RM_BASE_URL || '')
+      .trim()
+      .replace(/\/$/, '');
     if (!baseUrl) {
-      throw new ServiceUnavailableException('Integracao TOTVS IND.BI.0025 ainda nao provisionada');
+      throw new ServiceUnavailableException(
+        'Integracao TOTVS IND.BI.0025 ainda nao provisionada',
+      );
     }
     const [company, system] = QUERY_CONTEXT.split('/');
-    const timeoutMs = Math.max(1_000, Number(process.env.TOTVS_RM_TIMEOUT_MS || DEFAULT_TIMEOUT_MS));
-    const maxBytes = Math.max(1_024, Number(process.env.TOTVS_RM_MAX_RESPONSE_BYTES || DEFAULT_MAX_BYTES));
+    const timeoutMs = Math.max(
+      1_000,
+      Number(process.env.TOTVS_RM_TIMEOUT_MS || DEFAULT_TIMEOUT_MS),
+    );
+    const maxBytes = Math.max(
+      1_024,
+      Number(process.env.TOTVS_RM_MAX_RESPONSE_BYTES || DEFAULT_MAX_BYTES),
+    );
     const headers: Record<string, string> = { Accept: 'application/json' };
     const username = process.env.TOTVS_RM_USERNAME;
     const password = process.env.TOTVS_RM_PASSWORD;
-    if (!username || !password) throw new ServiceUnavailableException('Credencial TOTVS BASIC incompleta');
+    if (!username || !password)
+      throw new ServiceUnavailableException(
+        'Credencial TOTVS BASIC incompleta',
+      );
     headers.Authorization = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
     const url = `${baseUrl}/api/framework/v1/consultaSQLServer/RealizaConsulta/${encodeURIComponent(QUERY_CODE)}/${encodeURIComponent(company)}/${encodeURIComponent(system)}/`;
-    return { url, context: QUERY_CONTEXT, authType: AUTH_TYPE, headers, timeoutMs, maxBytes };
+    return {
+      url,
+      context: QUERY_CONTEXT,
+      authType: AUTH_TYPE,
+      headers,
+      timeoutMs,
+      maxBytes,
+    };
   }
 
   async status() {
     const lastRun = await this.prisma.totvsEmployeeSyncRun.findFirst({
-      where: { companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId, unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId },
+      where: {
+        companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+        unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+      },
       orderBy: { startedAt: 'desc' },
     });
     let provisioned = false;
@@ -132,7 +203,8 @@ export class TotvsEmployeeIntegrationService {
       schedule: DAILY_SYNC_CRON,
       timeZone: DAILY_SYNC_TIME_ZONE,
       formulaEnabled: true,
-      costRule: 'TOTAL_GERAL_LINHA_PERIODOS_20_30_40_SEM_PFRATEIOFIXO',
+      costRule:
+        'TOTAL_GERAL_LINHA_PERIODOS_20_30_40_COM_PFRATEIOFIXO_NAO_CONCILIADO',
       lastRun,
     };
   }
@@ -140,26 +212,34 @@ export class TotvsEmployeeIntegrationService {
   private normalizeRow(row: SourceRow): NormalizedRow {
     const companyCode = text(row, 'CODCOLIGADA');
     const sourceEmployeeKey = text(row, 'FK_FUNCIONARIO');
-    const employeeNumber = text(row, 'CHAPA') || (
-      companyCode && sourceEmployeeKey?.startsWith(`${companyCode}-`)
+    const employeeNumber =
+      text(row, 'CHAPA') ||
+      (companyCode && sourceEmployeeKey?.startsWith(`${companyCode}-`)
         ? sourceEmployeeKey.slice(companyCode.length + 1)
-        : null
-    );
+        : null);
     const displayName = text(row, 'NOME', 'NOMEFUNCIONARIO', 'FUNCIONARIO');
     const competenceValue = row.DT_MES;
     const periodValue = Number(text(row, 'NROPERIODO'));
     if (!companyCode || !employeeNumber || !displayName || !competenceValue) {
-      throw new BadRequestException('Retorno IND.BI.0025 sem CODCOLIGADA, CHAPA, NOME ou DT_MES');
+      throw new BadRequestException(
+        'Retorno IND.BI.0025 sem CODCOLIGADA, CHAPA, NOME ou DT_MES',
+      );
     }
     if (![20, 30, 40].includes(periodValue)) {
-      throw new BadRequestException('Retorno IND.BI.0025 com NROPERIODO fora de 20/30/40');
+      throw new BadRequestException(
+        'Retorno IND.BI.0025 com NROPERIODO fora de 20/30/40',
+      );
     }
     const employeeKey = sourceEmployeeKey || `${companyCode}-${employeeNumber}`;
     if (employeeKey !== `${companyCode}-${employeeNumber}`) {
-      throw new BadRequestException('FK_FUNCIONARIO nao corresponde a CODCOLIGADA + CHAPA');
+      throw new BadRequestException(
+        'FK_FUNCIONARIO nao corresponde a CODCOLIGADA + CHAPA',
+      );
     }
     const competenceRaw = sourceDate(competenceValue, 'DT_MES')!;
-    const competence = new Date(Date.UTC(competenceRaw.getUTCFullYear(), competenceRaw.getUTCMonth(), 1));
+    const competence = new Date(
+      Date.UTC(competenceRaw.getUTCFullYear(), competenceRaw.getUTCMonth(), 1),
+    );
     return {
       companyCode,
       employeeNumber,
@@ -169,17 +249,38 @@ export class TotvsEmployeeIntegrationService {
       displayName,
       jobName: text(row, 'NOMEFUNCAO', 'FUNCAO', 'FUNÇÃO', 'DESCRICAOFUNCAO'),
       departmentName: text(row, 'NOMESECAO', 'SECAO', 'SEÇÃO', 'DEPARTAMENTO'),
-      employmentStatus: text(row, 'SITUACAO', 'STATUSFUNCIONARIO', 'CODSITUACAO'),
-      admissionDate: sourceDate(row.DATAADMISSAO ?? row.DTADMISSAO ?? row['DATA DE ADMISSÃO'], 'DATAADMISSAO'),
-      dismissalDate: sourceDate(row.DATADEMISSAO ?? row.DTDEMISSAO, 'DATADEMISSAO'),
-      fixedAllocationValue: decimal(row['PFRATEIOFIXO.VALOR'] ?? row.VALORRATEIOFIXO ?? row.VALOR_RATEIO_FIXO),
-      totalGeneralLine: decimal(row['TOTAL GERAL LINHA'] ?? row.TOTALGERALLINHA ?? row.TOTAL_GERAL_LINHA),
+      employmentStatus: text(
+        row,
+        'SITUACAO',
+        'STATUSFUNCIONARIO',
+        'CODSITUACAO',
+      ),
+      admissionDate: sourceDate(
+        row.DATAADMISSAO ?? row.DTADMISSAO ?? row['DATA DE ADMISSÃO'],
+        'DATAADMISSAO',
+      ),
+      dismissalDate: sourceDate(
+        row.DATADEMISSAO ?? row.DTDEMISSAO,
+        'DATADEMISSAO',
+      ),
+      fixedAllocationValue: decimal(
+        row['PFRATEIOFIXO.VALOR'] ??
+          row.VALORRATEIOFIXO ??
+          row.VALOR_RATEIO_FIXO,
+      ),
+      totalGeneralLine: decimal(
+        row['TOTAL GERAL LINHA'] ??
+          row.TOTALGERALLINHA ??
+          row.TOTAL_GERAL_LINHA,
+      ),
     };
   }
 
   private async requestRows() {
     if (Date.now() < this.circuitOpenUntil) {
-      throw new ServiceUnavailableException('Circuit breaker TOTVS temporariamente aberto');
+      throw new ServiceUnavailableException(
+        'Circuit breaker TOTVS temporariamente aberto',
+      );
     }
     const config = this.config();
     let lastError: unknown;
@@ -194,16 +295,28 @@ export class TotvsEmployeeIntegrationService {
         });
         if (!response.ok) {
           if (TRANSIENT_STATUSES.has(response.status) && attempt < 2) {
-            await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+            await new Promise((resolve) =>
+              setTimeout(resolve, 250 * 2 ** attempt),
+            );
             continue;
           }
-          throw new BadGatewayException(`TOTVS respondeu HTTP ${response.status}`);
+          throw new BadGatewayException(
+            `TOTVS respondeu HTTP ${response.status}`,
+          );
         }
-        const contentLength = Number(response.headers.get('content-length') || 0);
-        if (contentLength > config.maxBytes) throw new BadGatewayException('Resposta TOTVS excedeu o limite permitido');
+        const contentLength = Number(
+          response.headers.get('content-length') || 0,
+        );
+        if (contentLength > config.maxBytes)
+          throw new BadGatewayException(
+            'Resposta TOTVS excedeu o limite permitido',
+          );
         const body = await response.text();
         const bytes = Buffer.byteLength(body);
-        if (bytes > config.maxBytes) throw new BadGatewayException('Resposta TOTVS excedeu o limite permitido');
+        if (bytes > config.maxBytes)
+          throw new BadGatewayException(
+            'Resposta TOTVS excedeu o limite permitido',
+          );
         let parsed: unknown;
         try {
           parsed = JSON.parse(body);
@@ -217,20 +330,23 @@ export class TotvsEmployeeIntegrationService {
             : Array.isArray((parsed as any)?.items)
               ? (parsed as any).items
               : null;
-        if (!rows) throw new BadGatewayException('Resposta TOTVS nao contem lista JSON');
+        if (!rows)
+          throw new BadGatewayException('Resposta TOTVS nao contem lista JSON');
         this.consecutiveFailures = 0;
         return { rows: rows as SourceRow[], bytes, context: config.context };
       } catch (error) {
         lastError = error;
-        if (attempt < 2 && (error as any)?.name === 'AbortError') continue;
+        if (attempt < 2 && error?.name === 'AbortError') continue;
         break;
       } finally {
         clearTimeout(timer);
       }
     }
     this.consecutiveFailures += 1;
-    if (this.consecutiveFailures >= 3) this.circuitOpenUntil = Date.now() + 60_000;
-    if ((lastError as any)?.name === 'AbortError') throw new ServiceUnavailableException('Timeout ao consultar a TOTVS');
+    if (this.consecutiveFailures >= 3)
+      this.circuitOpenUntil = Date.now() + 60_000;
+    if ((lastError as any)?.name === 'AbortError')
+      throw new ServiceUnavailableException('Timeout ao consultar a TOTVS');
     throw lastError;
   }
 
@@ -254,8 +370,11 @@ export class TotvsEmployeeIntegrationService {
       await this.refresh();
       this.logger.log('Sincronizacao diaria TOTVS IND.BI.0025 concluida');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Falha desconhecida';
-      this.logger.error(`Sincronizacao diaria TOTVS IND.BI.0025 falhou: ${message}`);
+      const message =
+        error instanceof Error ? error.message : 'Falha desconhecida';
+      this.logger.error(
+        `Sincronizacao diaria TOTVS IND.BI.0025 falhou: ${message}`,
+      );
     }
   }
 
@@ -283,7 +402,14 @@ export class TotvsEmployeeIntegrationService {
           rejectedRows += 1;
         }
       }
-      if (!normalized.length) throw new BadGatewayException('Nenhuma linha valida retornada pela IND.BI.0025');
+      if (!normalized.length)
+        throw new BadGatewayException(
+          'Nenhuma linha valida retornada pela IND.BI.0025',
+        );
+      if (rejectedRows > 0)
+        throw new BadGatewayException(
+          `IND.BI.0025 retornou ${rejectedRows} linha(s) invalida(s); nenhum agregado foi alterado`,
+        );
       const groups = new Map<string, NormalizedRow[]>();
       for (const item of normalized) {
         const key = `${item.employeeKey}|${dateKey(item.competence)}|${item.period}`;
@@ -291,20 +417,170 @@ export class TotvsEmployeeIntegrationService {
       }
       const [currentEmployees, currentAggregates] = await Promise.all([
         this.prisma.totvsEmployeeSnapshot.findMany({
-          where: { companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId, unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId, isCurrent: true },
+          where: {
+            companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+            unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+            source: SOURCE,
+            queryCode: QUERY_CODE,
+            isCurrent: true,
+          },
         }),
         this.prisma.totvsEmployeeCostAggregate.findMany({
-          where: { companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId, unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId, isCurrent: true },
+          where: {
+            companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+            unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+            source: SOURCE,
+            queryCode: QUERY_CODE,
+            isCurrent: true,
+          },
         }),
       ]);
-      const currentEmployeeByKey = new Map(currentEmployees.map((item) => [`${item.employeeKey}|${dateKey(item.competence)}|${item.period}`, item]));
-      const currentAggregateByKey = new Map(currentAggregates.map((item) => [`${item.employeeKey}|${dateKey(item.competence)}|${item.period}`, item]));
+      const currentEmployeeByKey = new Map(
+        currentEmployees.map((item) => [
+          `${item.employeeKey}|${dateKey(item.competence)}|${item.period}`,
+          item,
+        ]),
+      );
+      const currentAggregateByKey = new Map(
+        currentAggregates.map((item) => [
+          `${item.employeeKey}|${dateKey(item.competence)}|${item.period}`,
+          item,
+        ]),
+      );
       const employeeDeactivateIds: string[] = [];
       const aggregateDeactivateIds: string[] = [];
       const employeeCreates: any[] = [];
       const aggregateCreates: any[] = [];
+      const manifestCompetences = recentClosedCompetences();
+      const manifestEntries = new Map<
+        string,
+        Array<{
+          id: string;
+          companyCode: string;
+          employeeNumber: string;
+          employeeKey: string;
+          competence: Date;
+          period: number;
+          contentHash: string;
+          syncRunId: string;
+        }>
+      >(manifestCompetences.map((competence) => [dateKey(competence), []]));
       let employeeVersions = 0;
       let aggregateVersions = 0;
+
+      // A successful HTTP/JSON response is not proof that RM returned the
+      // complete snapshot. Closed months are append/correction-only here: a
+      // missing key or fewer source rows for an existing key requires manual
+      // review and must not retire a previously observed aggregate.
+      const coverageByCompetence = new Map(
+        manifestCompetences.map((competence) => [
+          dateKey(competence),
+          {
+            currentKeys: 0,
+            incomingKeys: 0,
+            missingKeys: 0,
+            reducedSourceRows: 0,
+          },
+        ]),
+      );
+      for (const rows of groups.values()) {
+        const competenceKey = dateKey(rows[0].competence);
+        const coverage = coverageByCompetence.get(competenceKey);
+        if (coverage) coverage.incomingKeys += 1;
+      }
+      for (const [key, current] of currentAggregateByKey) {
+        const competenceKey = dateKey(current.competence);
+        const coverage = coverageByCompetence.get(competenceKey);
+        if (!coverage || !current.active) continue;
+        coverage.currentKeys += 1;
+        const incomingRows = groups.get(key);
+        if (!incomingRows) coverage.missingKeys += 1;
+        else if (incomingRows.length < current.sourceRows)
+          coverage.reducedSourceRows += 1;
+      }
+      const incompleteCoverage = [...coverageByCompetence.entries()].filter(
+        ([, coverage]) =>
+          coverage.missingKeys > 0 || coverage.reducedSourceRows > 0,
+      );
+      if (incompleteCoverage.length) {
+        const detail = incompleteCoverage
+          .map(
+            ([competence, coverage]) =>
+              `${competence}: recebidas ${coverage.incomingKeys}/${coverage.currentKeys} chaves, ` +
+              `${coverage.missingKeys} ausente(s), ${coverage.reducedSourceRows} com menos linhas`,
+          )
+          .join('; ');
+        throw new BadGatewayException(
+          `Cobertura incompleta da IND.BI.0025 em mes fechado (${detail}). Revisao manual obrigatoria; nenhum agregado foi alterado.`,
+        );
+      }
+
+      // A key retired after a confirmed source removal may later reappear.
+      // Query historical maxima only for incoming keys without a current row;
+      // reusing version 1 would collide with the immutable historical version.
+      const [historicalEmployeeVersions, historicalAggregateVersions] =
+        await Promise.all([
+          (async () => {
+            const versions = new Map<string, number>();
+            for (const batch of missingVersionBatches(
+              groups,
+              new Set(currentEmployeeByKey.keys()),
+            )) {
+              const rows = await this.prisma.totvsEmployeeSnapshot.groupBy({
+                by: ['employeeKey'],
+                where: {
+                  companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+                  unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+                  source: SOURCE,
+                  queryCode: QUERY_CODE,
+                  competence: batch.competence,
+                  period: batch.period,
+                  employeeKey: { in: batch.employeeKeys },
+                },
+                _max: { version: true },
+              });
+              for (const row of rows) {
+                if (row._max.version !== null)
+                  versions.set(
+                    `${row.employeeKey}|${dateKey(batch.competence)}|${batch.period}`,
+                    row._max.version,
+                  );
+              }
+            }
+            return versions;
+          })(),
+          (async () => {
+            const versions = new Map<string, number>();
+            for (const batch of missingVersionBatches(
+              groups,
+              new Set(currentAggregateByKey.keys()),
+            )) {
+              const rows = await this.prisma.totvsEmployeeCostAggregate.groupBy(
+                {
+                  by: ['employeeKey'],
+                  where: {
+                    companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+                    unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+                    source: SOURCE,
+                    queryCode: QUERY_CODE,
+                    competence: batch.competence,
+                    period: batch.period,
+                    employeeKey: { in: batch.employeeKeys },
+                  },
+                  _max: { version: true },
+                },
+              );
+              for (const row of rows) {
+                if (row._max.version !== null)
+                  versions.set(
+                    `${row.employeeKey}|${dateKey(batch.competence)}|${batch.period}`,
+                    row._max.version,
+                  );
+              }
+            }
+            return versions;
+          })(),
+        ]);
 
       for (const [key, rows] of groups) {
         const first = rows[0];
@@ -313,14 +589,23 @@ export class TotvsEmployeeIntegrationService {
           jobName: first.jobName,
           departmentName: first.departmentName,
           employmentStatus: first.employmentStatus,
-          admissionDate: first.admissionDate ? dateKey(first.admissionDate) : null,
-          dismissalDate: first.dismissalDate ? dateKey(first.dismissalDate) : null,
+          admissionDate: first.admissionDate
+            ? dateKey(first.admissionDate)
+            : null,
+          dismissalDate: first.dismissalDate
+            ? dateKey(first.dismissalDate)
+            : null,
         };
         const employeeHash = canonicalHash(employeeData);
         const currentEmployee = currentEmployeeByKey.get(key);
-        if (!currentEmployee || currentEmployee.contentHash !== employeeHash) {
+        if (
+          !currentEmployee ||
+          currentEmployee.contentHash !== employeeHash ||
+          !currentEmployee.active
+        ) {
           if (currentEmployee) employeeDeactivateIds.push(currentEmployee.id);
           employeeCreates.push({
+            id: randomUUID(),
             companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
             unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
             companyCode: first.companyCode,
@@ -328,7 +613,11 @@ export class TotvsEmployeeIntegrationService {
             employeeKey: first.employeeKey,
             competence: first.competence,
             period: first.period,
-            version: (currentEmployee?.version || 0) + 1,
+            version:
+              Math.max(
+                currentEmployee?.version || 0,
+                historicalEmployeeVersions.get(key) || 0,
+              ) + 1,
             displayName: first.displayName,
             jobName: first.jobName,
             departmentName: first.departmentName,
@@ -341,10 +630,24 @@ export class TotvsEmployeeIntegrationService {
           employeeVersions += 1;
         }
 
-        const allocationValues = rows.map((row) => row.fixedAllocationValue).filter((value): value is Prisma.Decimal => value !== null);
-        const totalValues = rows.map((row) => row.totalGeneralLine).filter((value): value is Prisma.Decimal => value !== null);
-        const fixedAllocationValue = allocationValues.length ? allocationValues.reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0)) : null;
-        const totalGeneralLine = totalValues.length ? totalValues.reduce((sum, value) => sum.plus(value), new Prisma.Decimal(0)) : null;
+        const allocationValues = rows
+          .map((row) => row.fixedAllocationValue)
+          .filter((value): value is Prisma.Decimal => value !== null);
+        const totalValues = rows
+          .map((row) => row.totalGeneralLine)
+          .filter((value): value is Prisma.Decimal => value !== null);
+        const fixedAllocationValue = allocationValues.length
+          ? allocationValues.reduce(
+              (sum, value) => sum.plus(value),
+              new Prisma.Decimal(0),
+            )
+          : null;
+        const totalGeneralLine = totalValues.length
+          ? totalValues.reduce(
+              (sum, value) => sum.plus(value),
+              new Prisma.Decimal(0),
+            )
+          : null;
         const aggregateData = {
           sourceRows: rows.length,
           allocationRows: allocationValues.length,
@@ -356,9 +659,19 @@ export class TotvsEmployeeIntegrationService {
         };
         const aggregateHash = canonicalHash(aggregateData);
         const currentAggregate = currentAggregateByKey.get(key);
-        if (!currentAggregate || currentAggregate.contentHash !== aggregateHash) {
-          if (currentAggregate) aggregateDeactivateIds.push(currentAggregate.id);
+        let observedAggregateId = currentAggregate?.id;
+        let observedAggregateRunId = currentAggregate?.syncRunId;
+        if (
+          !currentAggregate ||
+          currentAggregate.contentHash !== aggregateHash ||
+          !currentAggregate.active
+        ) {
+          if (currentAggregate)
+            aggregateDeactivateIds.push(currentAggregate.id);
+          observedAggregateId = randomUUID();
+          observedAggregateRunId = run.id;
           aggregateCreates.push({
+            id: observedAggregateId,
             companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
             unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
             companyCode: first.companyCode,
@@ -366,7 +679,11 @@ export class TotvsEmployeeIntegrationService {
             employeeKey: first.employeeKey,
             competence: first.competence,
             period: first.period,
-            version: (currentAggregate?.version || 0) + 1,
+            version:
+              Math.max(
+                currentAggregate?.version || 0,
+                historicalAggregateVersions.get(key) || 0,
+              ) + 1,
             sourceRows: aggregateData.sourceRows,
             allocationRows: aggregateData.allocationRows,
             fixedAllocationValue,
@@ -379,22 +696,75 @@ export class TotvsEmployeeIntegrationService {
           });
           aggregateVersions += 1;
         }
+        const competenceKey = dateKey(first.competence);
+        if (manifestEntries.has(competenceKey)) {
+          manifestEntries.get(competenceKey)!.push({
+            id: observedAggregateId!,
+            companyCode: first.companyCode,
+            employeeNumber: first.employeeNumber,
+            employeeKey: first.employeeKey,
+            competence: first.competence,
+            period: first.period,
+            contentHash: aggregateHash,
+            syncRunId: observedAggregateRunId!,
+          });
+        }
       }
 
-      await this.prisma.$transaction(async (tx) => {
-        for (const ids of chunks(employeeDeactivateIds)) {
-          await tx.totvsEmployeeSnapshot.updateMany({ where: { id: { in: ids } }, data: { isCurrent: false } });
-        }
-        for (const data of chunks(employeeCreates)) {
-          await tx.totvsEmployeeSnapshot.createMany({ data });
-        }
-        for (const ids of chunks(aggregateDeactivateIds)) {
-          await tx.totvsEmployeeCostAggregate.updateMany({ where: { id: { in: ids } }, data: { isCurrent: false } });
-        }
-        for (const data of chunks(aggregateCreates)) {
-          await tx.totvsEmployeeCostAggregate.createMany({ data });
-        }
-      }, { maxWait: 10_000, timeout: 120_000 });
+      const manifests = [...manifestEntries].map(([competenceKey, entries]) => {
+        const fingerprint = fingerprint0025Manifest(entries);
+        return {
+          id: randomUUID(),
+          syncRunId: run.id,
+          competence: new Date(`${competenceKey}T00:00:00.000Z`),
+          rowCount: fingerprint.rowCount,
+          contentHash: fingerprint.contentHash,
+          entries,
+        };
+      });
+      const aggregateMemberships = manifests.flatMap((manifest) =>
+        manifest.entries.map((entry) => ({
+          id: randomUUID(),
+          manifestId: manifest.id,
+          aggregateId: entry.id,
+        })),
+      );
+
+      await this.prisma.$transaction(
+        async (tx) => {
+          for (const ids of chunks(employeeDeactivateIds)) {
+            await tx.totvsEmployeeSnapshot.updateMany({
+              where: { id: { in: ids } },
+              data: { isCurrent: false },
+            });
+          }
+          for (const data of chunks(employeeCreates)) {
+            await tx.totvsEmployeeSnapshot.createMany({ data });
+          }
+          for (const ids of chunks(aggregateDeactivateIds)) {
+            await tx.totvsEmployeeCostAggregate.updateMany({
+              where: { id: { in: ids } },
+              data: { isCurrent: false },
+            });
+          }
+          for (const data of chunks(aggregateCreates)) {
+            await tx.totvsEmployeeCostAggregate.createMany({ data });
+          }
+          await tx.totvsEmployeeCostRunManifest.createMany({
+            data: manifests.map((manifest) => ({
+              id: manifest.id,
+              syncRunId: manifest.syncRunId,
+              competence: manifest.competence,
+              rowCount: manifest.rowCount,
+              contentHash: manifest.contentHash,
+            })),
+          });
+          for (const data of chunks(aggregateMemberships)) {
+            await tx.totvsEmployeeCostRunMembership.createMany({ data });
+          }
+        },
+        { maxWait: 10_000, timeout: 120_000 },
+      );
       return await this.prisma.totvsEmployeeSyncRun.update({
         where: { id: run.id },
         data: {
@@ -402,9 +772,14 @@ export class TotvsEmployeeIntegrationService {
           finishedAt: new Date(),
           acceptedRows: normalized.length,
           rejectedRows,
-          employeeCount: new Set(normalized.map((item) => item.employeeKey)).size,
+          employeeCount: new Set(normalized.map((item) => item.employeeKey))
+            .size,
           aggregateCount: groups.size,
-          replayed: employeeVersions === 0 && aggregateVersions === 0,
+          replayed:
+            employeeVersions === 0 &&
+            aggregateVersions === 0 &&
+            employeeDeactivateIds.length === 0 &&
+            aggregateDeactivateIds.length === 0,
         },
       });
     } catch (error) {
@@ -413,8 +788,11 @@ export class TotvsEmployeeIntegrationService {
         data: {
           status: 'FAILED',
           finishedAt: new Date(),
-          errorCode: (error as any)?.name || 'SYNC_ERROR',
-          errorDetail: String((error as any)?.message || 'Falha na sincronizacao').slice(0, 500),
+          errorCode: error?.name || 'SYNC_ERROR',
+          errorDetail: String(error?.message || 'Falha na sincronizacao').slice(
+            0,
+            500,
+          ),
         },
       });
       throw error;
@@ -432,10 +810,19 @@ export class TotvsEmployeeIntegrationService {
         isCurrent: true,
         active: true,
         ...(search
-          ? { OR: [{ displayName: { contains: search, mode: 'insensitive' } }, { employeeNumber: { contains: search, mode: 'insensitive' } }] }
+          ? {
+              OR: [
+                { displayName: { contains: search, mode: 'insensitive' } },
+                { employeeNumber: { contains: search, mode: 'insensitive' } },
+              ],
+            }
           : {}),
       },
-      orderBy: [{ displayName: 'asc' }, { employeeNumber: 'asc' }, { period: 'asc' }],
+      orderBy: [
+        { displayName: 'asc' },
+        { employeeNumber: 'asc' },
+        { period: 'asc' },
+      ],
       take: 100,
     });
     const unique = new Map<string, any>();
@@ -458,22 +845,43 @@ export class TotvsEmployeeIntegrationService {
     return { competence: dateKey(competence), operators: [...unique.values()] };
   }
 
-  async createAssignment(fleetAssignmentId: string, body: any, actorId: string) {
+  async createAssignment(
+    fleetAssignmentId: string,
+    body: any,
+    actorId: string,
+  ) {
     const fleet = await this.prisma.usinaAsphaltTeamFleetAssignment.findFirst({
       where: { id: fleetAssignmentId, deletedAt: null },
     });
-    if (!fleet) throw new NotFoundException('Vinculo mensal de frota nao encontrado');
+    if (!fleet)
+      throw new NotFoundException('Vinculo mensal de frota nao encontrado');
     const validFrom = parseDate(body?.validFrom, 'validFrom');
     const validTo = parseDate(body?.validTo, 'validTo');
-    if (validTo < validFrom || validFrom < fleet.validFrom || validTo > fleet.validTo) {
-      throw new BadRequestException('Vigencia do operador deve estar dentro da vigencia da frota');
+    if (
+      validTo < validFrom ||
+      validFrom < fleet.validFrom ||
+      validTo > fleet.validTo
+    ) {
+      throw new BadRequestException(
+        'Vigencia do operador deve estar dentro da vigencia da frota',
+      );
     }
     const employeeKey = String(body?.employeeKey || '').trim();
     const employee = await this.prisma.totvsEmployeeSnapshot.findFirst({
-      where: { companyId: fleet.companyId, unitId: fleet.unitId, employeeKey, competence: fleet.competence, isCurrent: true, active: true },
+      where: {
+        companyId: fleet.companyId,
+        unitId: fleet.unitId,
+        employeeKey,
+        competence: fleet.competence,
+        isCurrent: true,
+        active: true,
+      },
       orderBy: { period: 'asc' },
     });
-    if (!employee) throw new BadRequestException('Operador nao consta no snapshot TOTVS da competencia');
+    if (!employee)
+      throw new BadRequestException(
+        'Operador nao consta no snapshot TOTVS da competencia',
+      );
     try {
       return await this.prisma.$transaction(async (tx) => {
         const created = await tx.usinaAsphaltFleetOperatorAssignment.create({
@@ -490,13 +898,29 @@ export class TotvsEmployeeIntegrationService {
           },
         });
         await tx.usinaAsphaltTeamAudit.create({
-          data: { teamId: fleet.teamId, entityType: 'FLEET_OPERATOR_ASSIGNMENT', entityId: created.id, action: 'CREATE', actorId, after: created as any },
+          data: {
+            teamId: fleet.teamId,
+            entityType: 'FLEET_OPERATOR_ASSIGNMENT',
+            entityId: created.id,
+            action: 'CREATE',
+            actorId,
+            after: created as any,
+          },
         });
-        return { ...created, validFrom: dateKey(created.validFrom), validTo: dateKey(created.validTo) };
+        return {
+          ...created,
+          validFrom: dateKey(created.validFrom),
+          validTo: dateKey(created.validTo),
+        };
       });
     } catch (error: any) {
-      if (error?.code === 'P2004' || String(error?.message || '').includes('no_fleet_overlap')) {
-        throw new BadRequestException('Este colaborador ja esta vinculado a esta frota no periodo informado');
+      if (
+        error?.code === 'P2004' ||
+        String(error?.message || '').includes('no_fleet_overlap')
+      ) {
+        throw new BadRequestException(
+          'Este colaborador ja esta vinculado a esta frota no periodo informado',
+        );
       }
       throw error;
     }
@@ -594,13 +1018,10 @@ export class TotvsEmployeeIntegrationService {
 
     try {
       await this.prisma.$transaction(async (tx) => {
-        const current =
-          await tx.usinaAsphaltFleetOperatorAssignment.findMany({
-            where: { fleetAssignmentId: fleet.id, deletedAt: null },
-          });
-        const currentById = new Map(
-          current.map((item) => [item.id, item]),
-        );
+        const current = await tx.usinaAsphaltFleetOperatorAssignment.findMany({
+          where: { fleetAssignmentId: fleet.id, deletedAt: null },
+        });
+        const currentById = new Map(current.map((item) => [item.id, item]));
         const requestedIds = new Set(
           assignments.flatMap((item) => (item.id ? [item.id] : [])),
         );
@@ -615,15 +1036,14 @@ export class TotvsEmployeeIntegrationService {
         for (const previous of current.filter(
           (item) => !requestedIds.has(item.id),
         )) {
-          const deleted =
-            await tx.usinaAsphaltFleetOperatorAssignment.update({
-              where: { id: previous.id },
-              data: {
-                deletedAt: new Date(),
-                deletedById: actorId,
-                updatedById: actorId,
-              },
-            });
+          const deleted = await tx.usinaAsphaltFleetOperatorAssignment.update({
+            where: { id: previous.id },
+            data: {
+              deletedAt: new Date(),
+              deletedById: actorId,
+              updatedById: actorId,
+            },
+          });
           await tx.usinaAsphaltTeamAudit.create({
             data: {
               teamId: fleet.teamId,
@@ -650,11 +1070,12 @@ export class TotvsEmployeeIntegrationService {
           };
           if (item.id) {
             const previous = currentById.get(item.id)!;
-            const updated =
-              await tx.usinaAsphaltFleetOperatorAssignment.update({
+            const updated = await tx.usinaAsphaltFleetOperatorAssignment.update(
+              {
                 where: { id: item.id },
                 data,
-              });
+              },
+            );
             await tx.usinaAsphaltTeamAudit.create({
               data: {
                 teamId: fleet.teamId,
@@ -667,8 +1088,8 @@ export class TotvsEmployeeIntegrationService {
               },
             });
           } else {
-            const created =
-              await tx.usinaAsphaltFleetOperatorAssignment.create({
+            const created = await tx.usinaAsphaltFleetOperatorAssignment.create(
+              {
                 data: {
                   fleetAssignmentId: fleet.id,
                   companyId: fleet.companyId,
@@ -676,7 +1097,8 @@ export class TotvsEmployeeIntegrationService {
                   ...data,
                   createdById: actorId,
                 },
-              });
+              },
+            );
             await tx.usinaAsphaltTeamAudit.create({
               data: {
                 teamId: fleet.teamId,
@@ -705,10 +1127,7 @@ export class TotvsEmployeeIntegrationService {
     const saved =
       await this.prisma.usinaAsphaltFleetOperatorAssignment.findMany({
         where: { fleetAssignmentId: fleet.id, deletedAt: null },
-        orderBy: [
-          { employeeDisplayName: 'asc' },
-          { validFrom: 'asc' },
-        ],
+        orderBy: [{ employeeDisplayName: 'asc' }, { validFrom: 'asc' }],
       });
     return {
       fleetAssignmentId: fleet.id,
@@ -721,48 +1140,101 @@ export class TotvsEmployeeIntegrationService {
   }
 
   async updateAssignment(id: string, body: any, actorId: string) {
-    const current = await this.prisma.usinaAsphaltFleetOperatorAssignment.findFirst({
-      where: { id, deletedAt: null },
-      include: { fleetAssignment: true },
-    });
-    if (!current) throw new NotFoundException('Vinculo de operador nao encontrado');
+    const current =
+      await this.prisma.usinaAsphaltFleetOperatorAssignment.findFirst({
+        where: { id, deletedAt: null },
+        include: { fleetAssignment: true },
+      });
+    if (!current)
+      throw new NotFoundException('Vinculo de operador nao encontrado');
     const validFrom = parseDate(body?.validFrom, 'validFrom');
     const validTo = parseDate(body?.validTo, 'validTo');
-    if (validTo < validFrom || validFrom < current.fleetAssignment.validFrom || validTo > current.fleetAssignment.validTo) {
-      throw new BadRequestException('Vigencia do operador deve estar dentro da vigencia da frota');
+    if (
+      validTo < validFrom ||
+      validFrom < current.fleetAssignment.validFrom ||
+      validTo > current.fleetAssignment.validTo
+    ) {
+      throw new BadRequestException(
+        'Vigencia do operador deve estar dentro da vigencia da frota',
+      );
     }
     const employeeKey = String(body?.employeeKey || '').trim();
     const employee = await this.prisma.totvsEmployeeSnapshot.findFirst({
-      where: { companyId: current.companyId, unitId: current.unitId, employeeKey, competence: current.fleetAssignment.competence, isCurrent: true, active: true },
+      where: {
+        companyId: current.companyId,
+        unitId: current.unitId,
+        employeeKey,
+        competence: current.fleetAssignment.competence,
+        isCurrent: true,
+        active: true,
+      },
       orderBy: { period: 'asc' },
     });
-    if (!employee) throw new BadRequestException('Operador nao consta no snapshot TOTVS da competencia');
+    if (!employee)
+      throw new BadRequestException(
+        'Operador nao consta no snapshot TOTVS da competencia',
+      );
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.usinaAsphaltFleetOperatorAssignment.update({
         where: { id },
-        data: { employeeKey, employeeDisplayName: employee.displayName, validFrom, validTo, observation: String(body?.observation || '').trim() || null, updatedById: actorId },
+        data: {
+          employeeKey,
+          employeeDisplayName: employee.displayName,
+          validFrom,
+          validTo,
+          observation: String(body?.observation || '').trim() || null,
+          updatedById: actorId,
+        },
       });
       await tx.usinaAsphaltTeamAudit.create({
-        data: { teamId: current.fleetAssignment.teamId, entityType: 'FLEET_OPERATOR_ASSIGNMENT', entityId: id, action: 'UPDATE', actorId, before: current as any, after: updated as any },
+        data: {
+          teamId: current.fleetAssignment.teamId,
+          entityType: 'FLEET_OPERATOR_ASSIGNMENT',
+          entityId: id,
+          action: 'UPDATE',
+          actorId,
+          before: current as any,
+          after: updated as any,
+        },
       });
-      return { ...updated, validFrom: dateKey(updated.validFrom), validTo: dateKey(updated.validTo) };
+      return {
+        ...updated,
+        validFrom: dateKey(updated.validFrom),
+        validTo: dateKey(updated.validTo),
+      };
     });
   }
 
   async deleteAssignment(id: string, reason: string, actorId: string) {
-    if (!String(reason || '').trim()) throw new BadRequestException('Motivo da exclusao obrigatorio');
-    const current = await this.prisma.usinaAsphaltFleetOperatorAssignment.findFirst({
-      where: { id, deletedAt: null },
-      include: { fleetAssignment: true },
-    });
-    if (!current) throw new NotFoundException('Vinculo de operador nao encontrado');
+    if (!String(reason || '').trim())
+      throw new BadRequestException('Motivo da exclusao obrigatorio');
+    const current =
+      await this.prisma.usinaAsphaltFleetOperatorAssignment.findFirst({
+        where: { id, deletedAt: null },
+        include: { fleetAssignment: true },
+      });
+    if (!current)
+      throw new NotFoundException('Vinculo de operador nao encontrado');
     return this.prisma.$transaction(async (tx) => {
       const deleted = await tx.usinaAsphaltFleetOperatorAssignment.update({
         where: { id },
-        data: { deletedAt: new Date(), deletedById: actorId, updatedById: actorId },
+        data: {
+          deletedAt: new Date(),
+          deletedById: actorId,
+          updatedById: actorId,
+        },
       });
       await tx.usinaAsphaltTeamAudit.create({
-        data: { teamId: current.fleetAssignment.teamId, entityType: 'FLEET_OPERATOR_ASSIGNMENT', entityId: id, action: 'DELETE', note: reason.trim(), actorId, before: current as any, after: deleted as any },
+        data: {
+          teamId: current.fleetAssignment.teamId,
+          entityType: 'FLEET_OPERATOR_ASSIGNMENT',
+          entityId: id,
+          action: 'DELETE',
+          note: reason.trim(),
+          actorId,
+          before: current as any,
+          after: deleted as any,
+        },
       });
       return { ok: true, id };
     });
