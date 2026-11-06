@@ -294,6 +294,21 @@ export async function getLucasFleetGroupLaborActuals(
       keyGroups.set(key, groupKeys);
     }
   }
+  const operatorVehiclesByKey = new Map<string, Map<string, string>>();
+  const extraCrewVehiclesByKey = new Map<string, Set<string>>();
+  for (const reference of validationReferences) {
+    if (reference.source === 'LUCAS') {
+      const vehicles =
+        extraCrewVehiclesByKey.get(reference.key) || new Set<string>();
+      vehicles.add(reference.vehicleId);
+      extraCrewVehiclesByKey.set(reference.key, vehicles);
+      continue;
+    }
+    const vehicles =
+      operatorVehiclesByKey.get(reference.key) || new Map<string, string>();
+    vehicles.set(reference.vehicleId, reference.groupKey);
+    operatorVehiclesByKey.set(reference.key, vehicles);
+  }
   const keys = [...keyGroups.keys()];
   // For this dashboard JR designated IND.BI.0025 itself as the canonical
   // rateio. IND.BI.0039 approvals are audit-only and must never override it.
@@ -355,6 +370,71 @@ export async function getLucasFleetGroupLaborActuals(
     costs.set(row.employeeKey, [...(costs.get(row.employeeKey) || []), row]);
   }
   const Decimal = Prisma.Decimal.clone({ precision: 65 });
+  const operatorShares = new Map<string, Map<string, Prisma.Decimal>>();
+  for (const [key, linkedGroups] of keyGroups) {
+    if (
+      linkedGroups.size < 2 ||
+      sourceIntegrityError ||
+      (keysRequiringValidation.has(key) && !activeValidatedKeys.has(key))
+    ) {
+      continue;
+    }
+    const operatorVehicles =
+      operatorVehiclesByKey.get(key) || new Map<string, string>();
+    // A crew entry for the same vehicle is a duplicate role, not extra work.
+    // An entry on another vehicle needs its own business allocation rule.
+    if (
+      [...(extraCrewVehiclesByKey.get(key) || [])].some(
+        (vehicleId) => !operatorVehicles.has(vehicleId),
+      )
+    ) {
+      continue;
+    }
+    const vehicles = [...operatorVehicles.entries()].sort(([left], [right]) =>
+      left < right ? -1 : left > right ? 1 : 0,
+    );
+    const operatorGroups = new Set(vehicles.map(([, groupKey]) => groupKey));
+    if (
+      vehicles.length < 2 ||
+      operatorGroups.size !== linkedGroups.size ||
+      [...linkedGroups].some((groupKey) => !operatorGroups.has(groupKey))
+    ) {
+      continue;
+    }
+    const rows = costs.get(key) || [];
+    if (!rows.length || rows.some((row) => row.amount === null)) continue;
+
+    // Round the employee's verified monthly cost once, then distribute cents
+    // per distinct active vehicle. This keeps displayed group totals additive.
+    const total = rows.reduce(
+      (sum, row) => sum.plus(row.amount!.toString()),
+      new Decimal(0),
+    );
+    const totalCents = BigInt(total.toDecimalPlaces(2).times(100).toFixed(0));
+    const vehicleCount = BigInt(vehicles.length);
+    const baseCents = totalCents / vehicleCount;
+    const remainder = totalCents % vehicleCount;
+    const remainderCount = remainder < 0n ? -remainder : remainder;
+    const remainderStep = remainder < 0n ? -1n : 1n;
+    const centsByGroup = new Map<string, bigint>();
+    vehicles.forEach(([, groupKey], index) => {
+      const vehicleCents =
+        baseCents + (BigInt(index) < remainderCount ? remainderStep : 0n);
+      centsByGroup.set(
+        groupKey,
+        (centsByGroup.get(groupKey) || 0n) + vehicleCents,
+      );
+    });
+    operatorShares.set(
+      key,
+      new Map(
+        [...centsByGroup].map(([groupKey, cents]) => [
+          groupKey,
+          new Decimal(cents.toString()).div(100),
+        ]),
+      ),
+    );
+  }
   const groupLaborActuals = [...groups].map(([groupKey, group]) => {
     // No linked employee is unknown coverage, not a proven monetary zero.
     let complete =
@@ -363,10 +443,6 @@ export async function getLucasFleetGroupLaborActuals(
     let valuedEmployeeCount = 0;
     let missingCostEmployeeCount = 0;
     for (const key of group.keys) {
-      if ((keyGroups.get(key)?.size || 0) > 1) {
-        complete = false;
-        continue; // An employee shared by groups cannot be allocated by assumption.
-      }
       if (keysRequiringValidation.has(key) && !activeValidatedKeys.has(key)) {
         complete = false;
         continue;
@@ -377,8 +453,17 @@ export async function getLucasFleetGroupLaborActuals(
         missingCostEmployeeCount += 1;
         continue;
       }
+      if ((keyGroups.get(key)?.size || 0) > 1) {
+        const share = operatorShares.get(key)?.get(groupKey);
+        if (!share) {
+          complete = false;
+          continue;
+        }
+        amount = amount.plus(share);
+      } else {
+        for (const row of rows) amount = amount.plus(row.amount!.toString());
+      }
       valuedEmployeeCount += 1;
-      for (const row of rows) amount = amount.plus(row.amount!.toString());
     }
     const missingVehicleCount = new Set(
       group.missingLinks.map((link) => link.vehicleId),
@@ -422,8 +507,8 @@ export async function getLucasFleetGroupLaborActuals(
       pendingGroups: groupLaborActuals.filter(
         (row) => row.status !== 'COMPLETE',
       ).length,
-      conflictingEmployeeKeys: [...keyGroups.values()].filter(
-        (value) => value.size > 1,
+      conflictingEmployeeKeys: [...keyGroups].filter(
+        ([key, value]) => value.size > 1 && !operatorShares.has(key),
       ).length,
     },
   };
