@@ -419,7 +419,6 @@ export class TotvsEmployeeIntegrationService {
       const employeeCreates: any[] = [];
       const aggregateCreates: any[] = [];
       const manifestCompetences = recentClosedCompetences();
-      const manifestCompetenceKeys = new Set(manifestCompetences.map(dateKey));
       const manifestEntries = new Map<
         string,
         Array<{
@@ -436,18 +435,51 @@ export class TotvsEmployeeIntegrationService {
       let employeeVersions = 0;
       let aggregateVersions = 0;
 
-      // Reconcile only the cost aggregates for the two closed competences
-      // consumed by the dedicated fleet query. Employee snapshots feed other
-      // modules and intentionally keep their pre-existing lifecycle semantics.
-      if (rejectedRows === 0) {
-        for (const [key, current] of currentAggregateByKey) {
-          if (
-            manifestCompetenceKeys.has(dateKey(current.competence)) &&
-            !groups.has(key)
-          ) {
-            aggregateDeactivateIds.push(current.id);
-          }
-        }
+      // A successful HTTP/JSON response is not proof that RM returned the
+      // complete snapshot. Closed months are append/correction-only here: a
+      // missing key or fewer source rows for an existing key requires manual
+      // review and must not retire a previously observed aggregate.
+      const coverageByCompetence = new Map(
+        manifestCompetences.map((competence) => [
+          dateKey(competence),
+          {
+            currentKeys: 0,
+            incomingKeys: 0,
+            missingKeys: 0,
+            reducedSourceRows: 0,
+          },
+        ]),
+      );
+      for (const rows of groups.values()) {
+        const competenceKey = dateKey(rows[0].competence);
+        const coverage = coverageByCompetence.get(competenceKey);
+        if (coverage) coverage.incomingKeys += 1;
+      }
+      for (const [key, current] of currentAggregateByKey) {
+        const competenceKey = dateKey(current.competence);
+        const coverage = coverageByCompetence.get(competenceKey);
+        if (!coverage || !current.active) continue;
+        coverage.currentKeys += 1;
+        const incomingRows = groups.get(key);
+        if (!incomingRows) coverage.missingKeys += 1;
+        else if (incomingRows.length < current.sourceRows)
+          coverage.reducedSourceRows += 1;
+      }
+      const incompleteCoverage = [...coverageByCompetence.entries()].filter(
+        ([, coverage]) =>
+          coverage.missingKeys > 0 || coverage.reducedSourceRows > 0,
+      );
+      if (incompleteCoverage.length) {
+        const detail = incompleteCoverage
+          .map(
+            ([competence, coverage]) =>
+              `${competence}: recebidas ${coverage.incomingKeys}/${coverage.currentKeys} chaves, ` +
+              `${coverage.missingKeys} ausente(s), ${coverage.reducedSourceRows} com menos linhas`,
+          )
+          .join('; ');
+        throw new BadGatewayException(
+          `Cobertura incompleta da IND.BI.0025 em mes fechado (${detail}). Revisao manual obrigatoria; nenhum agregado foi alterado.`,
+        );
       }
 
       for (const [key, rows] of groups) {

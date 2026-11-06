@@ -87,6 +87,14 @@ describe('equipe mensal configurada por Lucas', () => {
     );
     expect(readOnly).toMatchObject({ canEdit: false });
     await expect(
+      service.findEmployees(
+        '2026-10',
+        'licitacao_gestor',
+        'outro-gestor',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.totvsEmployeeSnapshot.findMany).not.toHaveBeenCalled();
+    await expect(
       service.saveVehicle(
         '2026-10',
         'v1',
@@ -112,6 +120,9 @@ describe('equipe mensal configurada por Lucas', () => {
     const { service } = setup();
     await expect(
       service.findMonth('2026-10', 'licitacao_gestor', 'lucas-1'),
+    ).resolves.toMatchObject({ canEdit: true });
+    await expect(
+      service.findEmployees('2026-10', 'licitacao_gestor', 'lucas-1'),
     ).resolves.toMatchObject({ canEdit: true });
     await expect(
       service.findEmployees('2026-10', 'admin', 'admin-1'),

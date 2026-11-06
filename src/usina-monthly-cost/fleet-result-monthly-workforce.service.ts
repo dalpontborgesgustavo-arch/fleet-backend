@@ -87,7 +87,10 @@ export class FleetResultMonthlyWorkforceService {
     role: unknown,
     actorId?: unknown,
   ) {
-    ensureReadRole(role);
+    // The employee directory contains nominal payroll data. Keep the monthly
+    // vehicle assignments readable to the presentation role, but expose the
+    // selectable names only to the same exact actors allowed to edit them.
+    ensureEditor(role, actorId);
     const competence = parseMonth(competenceValue);
     const rows = await this.prisma.totvsEmployeeSnapshot.findMany({
       where: {

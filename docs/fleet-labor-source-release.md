@@ -45,8 +45,10 @@ a comparação deve usar os próprios valores e filtros da consulta oficial.
    manifests imutáveis (as duas competências fechadas), com contagem, hash e
    vínculo aos agregados vistos, inclusive quando o valor não mudou. Isso limita
    o ledger às competências usadas pela `0039`, em vez de repetir todo o
-   histórico da `0025` a cada dia. Chave ausente nessas competências é
-   aposentada somente quando o run não teve linha rejeitada.
+   histórico da `0025` a cada dia. Em mês fechado, qualquer chave corrente
+   ausente ou redução da quantidade de linhas-fonte da chave reprova o run antes
+   da transação. Nenhum agregado é aposentado automaticamente nesse cenário;
+   a cobertura precisa ser corrigida ou revisada manualmente.
 5. Somente após esse aceite técnico, habilitar temporariamente
    `TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED=true` e aprovar cada competência
    com hash, contagem, total e referência da evidência. O backend recalcula o
@@ -86,7 +88,9 @@ A edição da equipe mensal usa uma autorização separada:
 `LUCAS_FLEET_WORKFORCE_EDITOR_USER_IDS`. Administradores continuam autorizados;
 `licitacao_gestor` só recebe `canEdit=true` e consegue gravar quando seu ID está
 nessa lista. Sem a variável, o comportamento é negar escrita por padrão. Outros
-usuários de apresentação mantêm a leitura sem receber permissão de alteração.
+usuários de apresentação mantêm somente a leitura dos vínculos mensais já
+gravados. A lista nominal de funcionários selecionáveis usa a mesma autorização
+da escrita e responde `403` para os demais gestores.
 
 ## Evidência local em 05/11/2026
 
