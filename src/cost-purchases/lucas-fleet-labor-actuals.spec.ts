@@ -282,10 +282,11 @@ describe('mao de obra da frota com ultimo vinculo mensal', () => {
       inheritedVehicleCount: 1,
       employeeCount: 2,
     });
-    const costQuery = prisma.totvsEmployeeCostAggregate.findMany.mock
-      .calls[0][0] as unknown as {
-      where: { queryCode: string; competence: Date };
-    };
+    const costCalls = prisma.totvsEmployeeCostAggregate.findMany.mock
+      .calls as unknown as Array<
+      [{ where: { queryCode: string; competence: Date } }]
+    >;
+    const costQuery = costCalls[0][0];
     expect(costQuery.where.queryCode).toBe('IND.BI.0025');
     expect(costQuery.where.competence).toEqual(
       new Date('2026-10-01T00:00:00.000Z'),
@@ -515,6 +516,337 @@ describe('mao de obra da frota com ultimo vinculo mensal', () => {
       missingLinks: [
         { vehicleId: 'v2', fleet: '102', responsibleName: 'Hilario' },
       ],
+    });
+  });
+
+  it('rateia em centavos o custo do operador de duas frotas em grupos diferentes sem duplicar o total', async () => {
+    const prisma = setup();
+    const rows = [aggregate('1', '100.01')];
+    setCostRows(prisma, rows);
+    const vehicles = [
+      {
+        id: 'v1',
+        fleet: '68',
+        name: 'Frontier',
+        subgroup: 'CAMINHONETES',
+        rollerType: null,
+        active: true,
+      },
+      {
+        id: 'v2',
+        fleet: '313',
+        name: 'Strada',
+        subgroup: 'CARROS FROTA JR',
+        rollerType: null,
+        active: true,
+      },
+    ];
+    jest
+      .mocked(getLucasFleetRosterMonth)
+      .mockResolvedValue({ rows: vehicles } as never);
+    prisma.vehicle.findMany.mockResolvedValueOnce(
+      vehicles.map((vehicle) => ({
+        id: vehicle.id,
+        checklistEnabled: true,
+        monthlyChecklistResponsible: { name: 'Silvio' },
+      })),
+    );
+    prisma.checklist.findMany.mockResolvedValueOnce(
+      vehicles.map((vehicle) => ({
+        ...current('1-1'),
+        vehicleId: vehicle.id,
+      })),
+    );
+
+    const result = await getLucasFleetGroupLaborActuals(
+      prisma as unknown as PrismaService,
+      '2026-10',
+    );
+    const amounts = result.groupLaborActuals.map((group) =>
+      new Prisma.Decimal(group.laborActual ?? '0').toFixed(2),
+    );
+    expect(amounts.sort()).toEqual(['50.00', '50.01']);
+    expect(result.groupLaborActuals).toHaveLength(2);
+    expect(
+      result.groupLaborActuals.every(
+        (group) =>
+          group.status === 'COMPLETE' &&
+          group.missingLinkVehicleCount === 0 &&
+          group.missingCostEmployeeCount === 0 &&
+          group.valuedEmployeeCount === 1,
+      ),
+    ).toBe(true);
+    expect(
+      result.groupLaborActuals
+        .reduce(
+          (sum, group) => sum.plus(group.laborActual ?? '0'),
+          new Prisma.Decimal(0),
+        )
+        .toFixed(2),
+    ).toBe('100.01');
+  });
+
+  it('rateia um operador de tres frotas por veiculo: duas em um grupo e uma em outro', async () => {
+    const prisma = setup();
+    setCostRows(prisma, [aggregate('1', '90.00')]);
+    const vehicles = [
+      {
+        id: 'v1',
+        fleet: '68',
+        name: 'Frontier',
+        subgroup: 'CAMINHONETES',
+        rollerType: null,
+        active: true,
+      },
+      {
+        id: 'v2',
+        fleet: '69',
+        name: 'Outra caminhonete',
+        subgroup: 'CAMINHONETES',
+        rollerType: null,
+        active: true,
+      },
+      {
+        id: 'v3',
+        fleet: '313',
+        name: 'Strada',
+        subgroup: 'CARROS FROTA JR',
+        rollerType: null,
+        active: true,
+      },
+    ];
+    jest
+      .mocked(getLucasFleetRosterMonth)
+      .mockResolvedValue({ rows: vehicles } as never);
+    prisma.vehicle.findMany.mockResolvedValueOnce(
+      vehicles.map((vehicle) => ({
+        id: vehicle.id,
+        checklistEnabled: true,
+        monthlyChecklistResponsible: { name: 'Silvio' },
+      })),
+    );
+    prisma.checklist.findMany.mockResolvedValueOnce(
+      vehicles.map((vehicle) => ({
+        ...current('1-1'),
+        vehicleId: vehicle.id,
+      })),
+    );
+
+    const result = await getLucasFleetGroupLaborActuals(
+      prisma as unknown as PrismaService,
+      '2026-10',
+    );
+    const byGroup = new Map(
+      result.groupLaborActuals.map((group) => [group.groupKey, group]),
+    );
+    expect(
+      new Prisma.Decimal(
+        byGroup.get('SUBGROUP:CAMINHONETES')?.laborActual ?? '0',
+      ).toFixed(2),
+    ).toBe('60.00');
+    expect(
+      new Prisma.Decimal(
+        byGroup.get('SUBGROUP:CARROS FROTA JR')?.laborActual ?? '0',
+      ).toFixed(2),
+    ).toBe('30.00');
+    expect(
+      result.groupLaborActuals
+        .reduce(
+          (sum, group) => sum.plus(group.laborActual ?? '0'),
+          new Prisma.Decimal(0),
+        )
+        .toFixed(2),
+    ).toBe('90.00');
+  });
+
+  it('conta o custo uma vez quando o mesmo operador esta em duas frotas do mesmo grupo', async () => {
+    const prisma = setup();
+    setCostRows(prisma, [aggregate('1', '100.00')]);
+    const vehicles = [
+      {
+        id: 'v1',
+        fleet: '68',
+        name: 'Frontier',
+        subgroup: 'CAMINHONETES',
+        rollerType: null,
+        active: true,
+      },
+      {
+        id: 'v2',
+        fleet: '69',
+        name: 'Outra caminhonete',
+        subgroup: 'CAMINHONETES',
+        rollerType: null,
+        active: true,
+      },
+    ];
+    jest
+      .mocked(getLucasFleetRosterMonth)
+      .mockResolvedValue({ rows: vehicles } as never);
+    prisma.vehicle.findMany.mockResolvedValueOnce(
+      vehicles.map((vehicle) => ({
+        id: vehicle.id,
+        checklistEnabled: true,
+        monthlyChecklistResponsible: { name: 'Silvio' },
+      })),
+    );
+    prisma.checklist.findMany.mockResolvedValueOnce(
+      vehicles.map((vehicle) => ({
+        ...current('1-1'),
+        vehicleId: vehicle.id,
+      })),
+    );
+
+    const result = await getLucasFleetGroupLaborActuals(
+      prisma as unknown as PrismaService,
+      '2026-10',
+    );
+    expect(result.groupLaborActuals).toHaveLength(1);
+    expect(result.groupLaborActuals[0]).toMatchObject({
+      groupKey: 'SUBGROUP:CAMINHONETES',
+      laborActual: '100.000000',
+      employeeCount: 1,
+      valuedEmployeeCount: 1,
+      status: 'COMPLETE',
+    });
+  });
+
+  it('divide apenas uma vez o operador tambem listado na equipe da mesma frota', async () => {
+    const prisma = setup();
+    setCostRows(prisma, [aggregate('1', '100.00')]);
+    jest.mocked(getLucasFleetRosterMonth).mockResolvedValue({
+      rows: [
+        {
+          id: 'v1',
+          fleet: '230',
+          name: 'Vibro',
+          subgroup: 'VIBROACABADORAS',
+          rollerType: null,
+          active: true,
+        },
+        {
+          id: 'v2',
+          fleet: '68',
+          name: 'Frontier',
+          subgroup: 'CAMINHONETES',
+          rollerType: null,
+          active: true,
+        },
+      ],
+    } as never);
+    prisma.vehicle.findMany.mockResolvedValueOnce([
+      {
+        id: 'v1',
+        checklistEnabled: true,
+        monthlyChecklistResponsible: { name: 'Silvio' },
+      },
+      {
+        id: 'v2',
+        checklistEnabled: true,
+        monthlyChecklistResponsible: { name: 'Silvio' },
+      },
+    ]);
+    prisma.checklist.findMany.mockResolvedValueOnce([
+      current('1-1'),
+      { ...current('1-1'), vehicleId: 'v2' },
+    ]);
+    prisma.fleetResultMonthlyWorkforce.findMany.mockResolvedValueOnce([
+      {
+        vehicleId: 'v1',
+        assignments: [{ role: 'RAKE_WORKER', employeeKey: '1-1' }],
+      },
+    ]);
+
+    const result = await getLucasFleetGroupLaborActuals(
+      prisma as unknown as PrismaService,
+      '2026-10',
+    );
+    expect(result.groupLaborActuals).toHaveLength(2);
+    expect(
+      result.groupLaborActuals
+        .map((group) => new Prisma.Decimal(group.laborActual ?? '0').toFixed(2))
+        .sort(),
+    ).toEqual(['50.00', '50.00']);
+    expect(
+      result.groupLaborActuals.every(
+        (group) =>
+          group.status === 'COMPLETE' && group.valuedEmployeeCount === 1,
+      ),
+    ).toBe(true);
+    expect(
+      result.groupLaborActuals
+        .reduce(
+          (sum, group) => sum.plus(group.laborActual ?? '0'),
+          new Prisma.Decimal(0),
+        )
+        .toFixed(2),
+    ).toBe('100.00');
+  });
+
+  it('nao aplica o rateio de operadores a quem tambem esta como equipe extra em outro grupo', async () => {
+    const prisma = setup();
+    setCostRows(prisma, [aggregate('1', '100.00'), aggregate('2', '50.00')]);
+    jest.mocked(getLucasFleetRosterMonth).mockResolvedValue({
+      rows: [
+        {
+          id: 'v1',
+          fleet: '68',
+          name: 'Frontier',
+          subgroup: 'CAMINHONETES',
+          rollerType: null,
+          active: true,
+        },
+        {
+          id: 'v2',
+          fleet: '230',
+          name: 'Vibro',
+          subgroup: 'VIBROACABADORAS',
+          rollerType: null,
+          active: true,
+        },
+      ],
+    } as never);
+    prisma.vehicle.findMany.mockResolvedValueOnce([
+      {
+        id: 'v1',
+        checklistEnabled: true,
+        monthlyChecklistResponsible: { name: 'Silvio' },
+      },
+      {
+        id: 'v2',
+        checklistEnabled: true,
+        monthlyChecklistResponsible: { name: 'Silvio' },
+      },
+    ]);
+    prisma.checklist.findMany.mockResolvedValueOnce([
+      current('1-1'),
+      { ...current('1-2'), vehicleId: 'v2' },
+    ]);
+    prisma.fleetResultMonthlyWorkforce.findMany.mockResolvedValueOnce([
+      {
+        vehicleId: 'v2',
+        assignments: [{ role: 'RAKE_WORKER', employeeKey: '1-1' }],
+      },
+    ]);
+    prisma.totvsEmployeeSnapshot.findMany.mockResolvedValueOnce([
+      { employeeKey: '1-1', employmentStatus: 'A' },
+      { employeeKey: '1-2', employmentStatus: 'A' },
+    ]);
+
+    const result = await getLucasFleetGroupLaborActuals(
+      prisma as unknown as PrismaService,
+      '2026-10',
+    );
+    const byGroup = new Map(
+      result.groupLaborActuals.map((group) => [group.groupKey, group]),
+    );
+    expect(byGroup.get('SUBGROUP:CAMINHONETES')).toMatchObject({
+      laborActual: null,
+      status: 'PENDING_ASSIGNMENT_OR_SOURCE',
+    });
+    expect(byGroup.get('SUBGROUP:VIBROACABADORAS')).toMatchObject({
+      laborActual: '50.000000',
+      status: 'PENDING_ASSIGNMENT_OR_SOURCE',
     });
   });
 });
