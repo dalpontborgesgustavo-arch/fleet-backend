@@ -40,6 +40,13 @@ a comparação deve usar os próprios valores e filtros da consulta oficial.
    quando o total geral coincide. O último run da `0025` deve estar concluído
    sem rejeições; as duas capturas devem estar dentro de 36 horas. O campo
    `evidenceRef` é apenas observação humana e não substitui essa comparação.
+   A migration nova não retroage prova para runs antigos: aguardar a próxima
+   execução natural da `0025`, fora do horário comercial. Cada run grava dois
+   manifests imutáveis (as duas competências fechadas), com contagem, hash e
+   vínculo aos agregados vistos, inclusive quando o valor não mudou. Isso limita
+   o ledger às competências usadas pela `0039`, em vez de repetir todo o
+   histórico da `0025` a cada dia. Chave ausente nessas competências é
+   aposentada somente quando o run não teve linha rejeitada.
 5. Somente após esse aceite técnico, habilitar temporariamente
    `TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED=true` e aprovar cada competência
    com hash, contagem, total e referência da evidência. O backend recalcula o
@@ -74,6 +81,12 @@ subtração. O usuário da Apresentação é Lucas Arcaro Cirico (perfil de
 Licitação); não confundir com Lucas Rodrigues Figueira (Produção). Configure
 o ID autenticado do primeiro somente após o corte, preservando CEO/admin por
 papel. Não expor IDs internos na interface.
+
+A edição da equipe mensal usa uma autorização separada:
+`LUCAS_FLEET_WORKFORCE_EDITOR_USER_IDS`. Administradores continuam autorizados;
+`licitacao_gestor` só recebe `canEdit=true` e consegue gravar quando seu ID está
+nessa lista. Sem a variável, o comportamento é negar escrita por padrão. Outros
+usuários de apresentação mantêm a leitura sem receber permissão de alteração.
 
 ## Evidência local em 05/11/2026
 

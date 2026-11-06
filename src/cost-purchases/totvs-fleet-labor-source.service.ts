@@ -13,7 +13,9 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { USINA_ASPHALT_TEAM_CONTEXT } from '../usina-asphalt-teams/usina-asphalt-teams.rules';
 import {
-  compareFleetLaborParity, fingerprintFleetLaborFacts,
+  compareFleetLaborParity,
+  fingerprint0025Manifest,
+  fingerprintFleetLaborFacts,
   verifyApprovedFleetLaborIntegrity,
 } from './fleet-labor-integrity';
 
@@ -22,8 +24,14 @@ import {
 export const FLEET_LABOR_FORMULA_ID = 'IND.BI.0025_RATEADO_V1';
 export const FLEET_LABOR_QUERY_CODE = 'IND.BI.0039';
 const SOURCE_COLUMNS = new Set([
-  'CODCOLIGADA', 'CHAPA', 'FK_FUNCIONARIO', 'DT_MES', 'NROPERIODO',
-  'TOTAL_GERAL_RATEADO', 'CARDINALIDADE_OK', 'FORMULA_ID',
+  'CODCOLIGADA',
+  'CHAPA',
+  'FK_FUNCIONARIO',
+  'DT_MES',
+  'NROPERIODO',
+  'TOTAL_GERAL_RATEADO',
+  'CARDINALIDADE_OK',
+  'FORMULA_ID',
 ]);
 const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const MAX_ROWS = 50_000;
@@ -61,16 +69,26 @@ function competenceDate(value: string) {
   const month = Number(iso?.[2] || br?.[2]);
   const day = Number(iso?.[3] || br?.[1]);
   const parsed = new Date(Date.UTC(year, month - 1, day));
-  if (!year || !month || day !== 1 || parsed.getUTCFullYear() !== year ||
-      parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
-    throw new BadRequestException('DT_MES deve ser o primeiro dia de uma competencia valida');
+  if (
+    !year ||
+    !month ||
+    day !== 1 ||
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    throw new BadRequestException(
+      'DT_MES deve ser o primeiro dia de uma competencia valida',
+    );
   }
   return parsed;
 }
 
 function currentMonthInSaoPaulo() {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit',
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
   }).formatToParts(new Date());
   const year = Number(parts.find((part) => part.type === 'year')?.value);
   const month = Number(parts.find((part) => part.type === 'month')?.value);
@@ -85,7 +103,8 @@ function decimal(value: string) {
     throw new BadRequestException('TOTAL_GERAL_RATEADO invalido');
   }
   const parsed = new Prisma.Decimal(numeric);
-  if (!parsed.isFinite()) throw new BadRequestException('TOTAL_GERAL_RATEADO invalido');
+  if (!parsed.isFinite())
+    throw new BadRequestException('TOTAL_GERAL_RATEADO invalido');
   return parsed;
 }
 
@@ -95,20 +114,28 @@ export function normalizeFleetLaborRows(rows: unknown): {
   competences: { competence: string; rowCount: number; totalCost: string }[];
 } {
   if (!Array.isArray(rows) || rows.length === 0 || rows.length > MAX_ROWS) {
-    throw new BadRequestException('A consulta de custos deve retornar entre 1 e 50000 linhas');
+    throw new BadRequestException(
+      'A consulta de custos deve retornar entre 1 e 50000 linhas',
+    );
   }
   const seen = new Set<string>();
   const months = new Set<string>();
   const currentMonth = currentMonthInSaoPaulo();
   const normalized = rows.map((value, index) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new BadRequestException(`Linha ${index + 1} da consulta nao e um objeto`);
+      throw new BadRequestException(
+        `Linha ${index + 1} da consulta nao e um objeto`,
+      );
     }
     const row = value as SourceRow;
     const keys = Object.keys(row);
-    if (keys.length !== SOURCE_COLUMNS.size ||
-        keys.some((key) => !SOURCE_COLUMNS.has(key))) {
-      throw new BadRequestException(`Colunas da consulta divergentes na linha ${index + 1}`);
+    if (
+      keys.length !== SOURCE_COLUMNS.size ||
+      keys.some((key) => !SOURCE_COLUMNS.has(key))
+    ) {
+      throw new BadRequestException(
+        `Colunas da consulta divergentes na linha ${index + 1}`,
+      );
     }
     const companyCode = field(row, 'CODCOLIGADA');
     const employeeNumber = field(row, 'CHAPA');
@@ -116,51 +143,96 @@ export function normalizeFleetLaborRows(rows: unknown): {
     const period = Number(field(row, 'NROPERIODO'));
     const formulaId = field(row, 'FORMULA_ID');
     const cardinality = field(row, 'CARDINALIDADE_OK').toLowerCase();
-    if (!companyCode || !employeeNumber ||
-        employeeKey !== `${companyCode}-${employeeNumber}`) {
-      throw new BadRequestException(`Identidade de funcionario invalida na linha ${index + 1}`);
+    if (
+      !companyCode ||
+      !employeeNumber ||
+      employeeKey !== `${companyCode}-${employeeNumber}`
+    ) {
+      throw new BadRequestException(
+        `Identidade de funcionario invalida na linha ${index + 1}`,
+      );
     }
     if (![20, 30, 40].includes(period)) {
       throw new BadRequestException(`Periodo invalido na linha ${index + 1}`);
     }
-    if (formulaId !== FLEET_LABOR_FORMULA_ID ||
-        !['1', 'true'].includes(cardinality)) {
-      throw new BadRequestException(`Formula ou cardinalidade nao reconciliada na linha ${index + 1}`);
+    if (
+      formulaId !== FLEET_LABOR_FORMULA_ID ||
+      !['1', 'true'].includes(cardinality)
+    ) {
+      throw new BadRequestException(
+        `Formula ou cardinalidade nao reconciliada na linha ${index + 1}`,
+      );
     }
     const rowCompetence = competenceDate(field(row, 'DT_MES'));
-    if ((period === 30 && rowCompetence.getUTCMonth() !== 10) ||
-        (period === 40 && rowCompetence.getUTCMonth() !== 11)) {
-      throw new BadRequestException(`Periodo de decimo terceiro fora do mes esperado na linha ${index + 1}`);
+    if (
+      (period === 30 && rowCompetence.getUTCMonth() !== 10) ||
+      (period === 40 && rowCompetence.getUTCMonth() !== 11)
+    ) {
+      throw new BadRequestException(
+        `Periodo de decimo terceiro fora do mes esperado na linha ${index + 1}`,
+      );
     }
     if (rowCompetence >= currentMonth) {
-      throw new BadRequestException('A competencia precisa estar encerrada no calendario');
+      throw new BadRequestException(
+        'A competencia precisa estar encerrada no calendario',
+      );
     }
     months.add(rowCompetence.toISOString().slice(0, 7));
     if (months.size > 2) {
-      throw new BadRequestException('A consulta excedeu a janela de duas competencias');
+      throw new BadRequestException(
+        'A consulta excedeu a janela de duas competencias',
+      );
     }
     const key = `${companyCode}|${employeeKey}|${rowCompetence.toISOString()}|${period}`;
     if (seen.has(key)) {
-      throw new BadRequestException(`Funcionario e periodo duplicados na linha ${index + 1}`);
+      throw new BadRequestException(
+        `Funcionario e periodo duplicados na linha ${index + 1}`,
+      );
     }
     seen.add(key);
     const totalGeneralRateado = decimal(field(row, 'TOTAL_GERAL_RATEADO'));
-    const canonical = { companyCode, employeeNumber, employeeKey,
-      competence: rowCompetence.toISOString().slice(0, 10), period,
+    const canonical = {
+      companyCode,
+      employeeNumber,
+      employeeKey,
+      competence: rowCompetence.toISOString().slice(0, 10),
+      period,
       totalGeneralRateado: totalGeneralRateado.toFixed(6),
-      formulaId, cardinalityOk: true };
-    return { companyCode, employeeNumber, employeeKey,
-      competence: rowCompetence, period, totalGeneralRateado,
-      cardinalityOk: true as const, contentHash: hash(canonical) };
+      formulaId,
+      cardinalityOk: true,
+    };
+    return {
+      companyCode,
+      employeeNumber,
+      employeeKey,
+      competence: rowCompetence,
+      period,
+      totalGeneralRateado,
+      cardinalityOk: true as const,
+      contentHash: hash(canonical),
+    };
   });
-  normalized.sort((a, b) => a.competence.getTime() - b.competence.getTime() ||
-    a.employeeKey.localeCompare(b.employeeKey) || a.period - b.period);
+  normalized.sort(
+    (a, b) =>
+      a.competence.getTime() - b.competence.getTime() ||
+      a.employeeKey.localeCompare(b.employeeKey) ||
+      a.period - b.period,
+  );
   const sourceHash = hash(normalized.map((row) => row.contentHash));
   const competences = [...months].sort().map((competence) => {
-    const selected = normalized.filter((row) => row.competence.toISOString().startsWith(competence));
-    return { competence, rowCount: selected.length,
-      totalCost: selected.reduce((sum, row) => sum.plus(row.totalGeneralRateado),
-        new Prisma.Decimal(0)).toFixed(6) };
+    const selected = normalized.filter((row) =>
+      row.competence.toISOString().startsWith(competence),
+    );
+    return {
+      competence,
+      rowCount: selected.length,
+      totalCost: selected
+        .reduce(
+          (sum, row) => sum.plus(row.totalGeneralRateado),
+          new Prisma.Decimal(0),
+        )
+        .toFixed(6),
+    };
   });
   return { rows: normalized, sourceHash, competences };
 }
@@ -171,64 +243,162 @@ export class TotvsFleetLaborSourceService {
   constructor(private readonly prisma: PrismaService) {}
 
   private async evaluateParity(
-    db: Prisma.TransactionClient | PrismaService, runId: string, competence: Date,
+    db: Prisma.TransactionClient | PrismaService,
+    runId: string,
+    competence: Date,
   ) {
-    const run = await db.totvsFleetLaborSyncRun.findUnique({ where: { id: runId } });
-    if (!run || run.status !== 'STAGED' ||
-        run.queryCode !== FLEET_LABOR_QUERY_CODE ||
-        run.ruleVersion !== FLEET_LABOR_FORMULA_ID ||
-        run.companyId !== USINA_ASPHALT_TEAM_CONTEXT.companyId ||
-        run.unitId !== USINA_ASPHALT_TEAM_CONTEXT.unitId) {
+    const run = await db.totvsFleetLaborSyncRun.findUnique({
+      where: { id: runId },
+    });
+    if (
+      !run ||
+      run.status !== 'STAGED' ||
+      run.queryCode !== FLEET_LABOR_QUERY_CODE ||
+      run.ruleVersion !== FLEET_LABOR_FORMULA_ID ||
+      run.companyId !== USINA_ASPHALT_TEAM_CONTEXT.companyId ||
+      run.unitId !== USINA_ASPHALT_TEAM_CONTEXT.unitId
+    ) {
       throw new ConflictException('Lote inexistente ou nao preparado');
     }
     const baselineRun = await db.totvsEmployeeSyncRun.findFirst({
-      where: { companyId: run.companyId, unitId: run.unitId,
-        queryCode: 'IND.BI.0025' }, orderBy: { startedAt: 'desc' },
+      where: {
+        companyId: run.companyId,
+        unitId: run.unitId,
+        queryCode: 'IND.BI.0025',
+      },
+      orderBy: { startedAt: 'desc' },
     });
     const now = Date.now();
-    if (!run.finishedAt || now - run.finishedAt.getTime() > PARITY_MAX_AGE_MS ||
-        run.finishedAt.getTime() - now > 5 * 60_000 ||
-        !baselineRun || baselineRun.status !== 'SUCCEEDED' ||
-        baselineRun.rejectedRows !== 0 || !baselineRun.finishedAt ||
-        baselineRun.contextCode !== QUERY_CONTEXT ||
-        now - baselineRun.finishedAt.getTime() > PARITY_MAX_AGE_MS ||
-        baselineRun.finishedAt.getTime() - now > 5 * 60_000 ||
-        Math.abs(run.finishedAt.getTime() - baselineRun.finishedAt.getTime()) > PARITY_MAX_AGE_MS) {
-      throw new ConflictException('Capturas 0025/0039 fora da janela de 36h ou sincronizacao 0025 incompleta');
+    if (
+      !run.finishedAt ||
+      now - run.finishedAt.getTime() > PARITY_MAX_AGE_MS ||
+      run.finishedAt.getTime() - now > 5 * 60_000 ||
+      !baselineRun ||
+      baselineRun.status !== 'SUCCEEDED' ||
+      baselineRun.rejectedRows !== 0 ||
+      !baselineRun.finishedAt ||
+      baselineRun.contextCode !== QUERY_CONTEXT ||
+      now - baselineRun.finishedAt.getTime() > PARITY_MAX_AGE_MS ||
+      baselineRun.finishedAt.getTime() - now > 5 * 60_000 ||
+      Math.abs(run.finishedAt.getTime() - baselineRun.finishedAt.getTime()) >
+        PARITY_MAX_AGE_MS
+    ) {
+      throw new ConflictException(
+        'Capturas 0025/0039 fora da janela de 36h ou sincronizacao 0025 incompleta',
+      );
     }
-    const rows = await db.totvsFleetLaborCost.findMany({ where: { syncRunId: run.id } });
+    const rows = await db.totvsFleetLaborCost.findMany({
+      where: { syncRunId: run.id },
+    });
     if (!rows.length || rows.length !== run.acceptedRows || !run.sourceHash) {
       throw new ConflictException('Lote dedicado incompleto');
     }
     const fingerprint = fingerprintFleetLaborFacts(rows, {
-      companyId: run.companyId, unitId: run.unitId,
-      queryCode: FLEET_LABOR_QUERY_CODE, ruleVersion: FLEET_LABOR_FORMULA_ID,
+      companyId: run.companyId,
+      unitId: run.unitId,
+      queryCode: FLEET_LABOR_QUERY_CODE,
+      ruleVersion: FLEET_LABOR_FORMULA_ID,
       syncRunId: run.id,
     });
     if (fingerprint.sourceHash !== run.sourceHash) {
       throw new ConflictException('Hash canonico do lote dedicado divergiu');
     }
-    const monthRows = rows.filter((row) => row.competence.getTime() === competence.getTime());
-    if (!monthRows.length || monthRows.some((row) => row.approvalId !== null || row.isCurrent)) {
-      throw new ConflictException('Competencia ausente ou fatos do lote ja ativados');
+    const monthRows = rows.filter(
+      (row) => row.competence.getTime() === competence.getTime(),
+    );
+    if (
+      !monthRows.length ||
+      monthRows.some((row) => row.approvalId !== null || row.isCurrent)
+    ) {
+      throw new ConflictException(
+        'Competencia ausente ou fatos do lote ja ativados',
+      );
     }
     const monthFingerprint = fingerprintFleetLaborFacts(monthRows, {
-      companyId: run.companyId, unitId: run.unitId,
-      queryCode: FLEET_LABOR_QUERY_CODE, ruleVersion: FLEET_LABOR_FORMULA_ID,
+      companyId: run.companyId,
+      unitId: run.unitId,
+      queryCode: FLEET_LABOR_QUERY_CODE,
+      ruleVersion: FLEET_LABOR_FORMULA_ID,
       syncRunId: run.id,
     });
-    const baseline = await db.totvsEmployeeCostAggregate.findMany({
-      where: { companyId: run.companyId, unitId: run.unitId,
-        source: 'TOTVS_RM', queryCode: 'IND.BI.0025', competence,
-        isCurrent: true, active: true },
-      select: { companyCode: true, employeeNumber: true, employeeKey: true,
-        competence: true, period: true, totalGeneralLine: true, contentHash: true,
-        sourceRows: true, allocationRows: true, fixedAllocationValue: true,
-        allocationClosed: true, officialCostEligible: true, pendingReason: true,
-        syncRunId: true, syncRun: { select: { status: true, rejectedRows: true } } },
-    });
+    const [manifest, currentBaseline] = await Promise.all([
+      db.totvsEmployeeCostRunManifest.findUnique({
+        where: {
+          syncRunId_competence: { syncRunId: baselineRun.id, competence },
+        },
+        select: {
+          rowCount: true,
+          contentHash: true,
+          memberships: {
+            select: {
+              aggregate: {
+                select: {
+                  id: true,
+                  companyCode: true,
+                  employeeNumber: true,
+                  employeeKey: true,
+                  competence: true,
+                  period: true,
+                  totalGeneralLine: true,
+                  contentHash: true,
+                  sourceRows: true,
+                  allocationRows: true,
+                  fixedAllocationValue: true,
+                  allocationClosed: true,
+                  officialCostEligible: true,
+                  pendingReason: true,
+                  syncRunId: true,
+                  isCurrent: true,
+                  active: true,
+                  syncRun: { select: { status: true, rejectedRows: true } },
+                },
+              },
+            },
+          },
+        },
+      }),
+      db.totvsEmployeeCostAggregate.findMany({
+        where: {
+          companyId: run.companyId,
+          unitId: run.unitId,
+          source: 'TOTVS_RM',
+          queryCode: 'IND.BI.0025',
+          competence,
+          isCurrent: true,
+          active: true,
+        },
+        select: { id: true },
+      }),
+    ]);
+    const baseline =
+      manifest?.memberships.map((membership) => membership.aggregate) || [];
+    const observedIds = baseline.map((row) => row.id).sort();
+    const currentIds = currentBaseline.map((row) => row.id).sort();
+    let manifestHash: string | null = null;
+    try {
+      manifestHash = fingerprint0025Manifest(baseline).contentHash;
+    } catch {
+      /* handled by the fail-closed condition below */
+    }
+    if (
+      !manifest ||
+      manifest.rowCount !== baseline.length ||
+      manifest.contentHash !== manifestHash ||
+      observedIds.length !== currentIds.length ||
+      observedIds.some((id, index) => id !== currentIds[index]) ||
+      baseline.some((row) => !row.isCurrent || !row.active)
+    ) {
+      throw new ConflictException(
+        'Captura 0025 sem manifesto completo e corrente para a competencia',
+      );
+    }
     const report = compareFleetLaborParity(monthFingerprint.entries, baseline);
-    return { run, baselineRun, report, candidateHash: monthFingerprint.sourceHash };
+    return {
+      run,
+      baselineRun,
+      report,
+      candidateHash: monthFingerprint.sourceHash,
+    };
   }
 
   async parity(runId: string, competenceInput: string) {
@@ -236,9 +406,17 @@ export class TotvsFleetLaborSourceService {
       throw new BadRequestException('Competencia invalida');
     }
     const competence = new Date(`${competenceInput}-01T00:00:00.000Z`);
-    const { run, baselineRun, report } = await this.evaluateParity(this.prisma, runId, competence);
-    return { competence: competenceInput, runId: run.id,
-      baselineRunId: baselineRun.id, ...report };
+    const { run, baselineRun, report } = await this.evaluateParity(
+      this.prisma,
+      runId,
+      competence,
+    );
+    return {
+      competence: competenceInput,
+      runId: run.id,
+      baselineRunId: baselineRun.id,
+      ...report,
+    };
   }
 
   @Cron(DAILY_STAGE_CRON, { timeZone: DAILY_STAGE_TIME_ZONE })
@@ -248,16 +426,24 @@ export class TotvsFleetLaborSourceService {
       await this.stage();
     } catch (error) {
       // Never log source rows, response payloads, or credentials.
-      this.logger.error(`Isolated fleet labor staging failed: ${(error as any)?.name || 'Error'}`);
+      this.logger.error(
+        `Isolated fleet labor staging failed: ${error?.name || 'Error'}`,
+      );
     }
   }
 
   private config() {
-    const code = String(process.env.TOTVS_RM_FLEET_LABOR_QUERY_CODE || '').trim().toUpperCase();
+    const code = String(process.env.TOTVS_RM_FLEET_LABOR_QUERY_CODE || '')
+      .trim()
+      .toUpperCase();
     if (code !== FLEET_LABOR_QUERY_CODE) {
-      throw new ServiceUnavailableException('Consulta dedicada de custos de frota nao configurada');
+      throw new ServiceUnavailableException(
+        'Consulta dedicada de custos de frota nao configurada',
+      );
     }
-    const baseUrl = String(process.env.TOTVS_RM_BASE_URL || '').trim().replace(/\/$/, '');
+    const baseUrl = String(process.env.TOTVS_RM_BASE_URL || '')
+      .trim()
+      .replace(/\/$/, '');
     const username = process.env.TOTVS_RM_USERNAME;
     const password = process.env.TOTVS_RM_PASSWORD;
     if (!baseUrl || !username || !password) {
@@ -273,35 +459,68 @@ export class TotvsFleetLaborSourceService {
 
   async status() {
     const lastRun = await this.prisma.totvsFleetLaborSyncRun.findFirst({
-      where: { companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
-        unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId },
+      where: {
+        companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+        unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+      },
       orderBy: { startedAt: 'desc' },
-      select: { id: true, queryCode: true, status: true, startedAt: true, finishedAt: true,
-        receivedRows: true, acceptedRows: true, rejectedRows: true, sourceHash: true, errorCode: true },
+      select: {
+        id: true,
+        queryCode: true,
+        status: true,
+        startedAt: true,
+        finishedAt: true,
+        receivedRows: true,
+        acceptedRows: true,
+        rejectedRows: true,
+        sourceHash: true,
+        errorCode: true,
+      },
     });
     let configured = false;
-    try { this.config(); configured = true; } catch { /* Never return credentials. */ }
-    return { configured,
+    try {
+      this.config();
+      configured = true;
+    } catch {
+      /* Never return credentials. */
+    }
+    return {
+      configured,
       scheduled: process.env.TOTVS_RM_FLEET_LABOR_AUTO_STAGE === 'true',
-      activationEnabled: process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED === 'true',
-      schedule: DAILY_STAGE_CRON, timeZone: DAILY_STAGE_TIME_ZONE,
-      source: 'DEDICATED_TOTVS_QUERY', lastRun };
+      activationEnabled:
+        process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED === 'true',
+      schedule: DAILY_STAGE_CRON,
+      timeZone: DAILY_STAGE_TIME_ZONE,
+      source: 'DEDICATED_TOTVS_QUERY',
+      lastRun,
+    };
   }
 
-  private async requestRows(config: ReturnType<TotvsFleetLaborSourceService['config']>) {
+  private async requestRows(
+    config: ReturnType<TotvsFleetLaborSourceService['config']>,
+  ) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
       const response = await fetch(config.url, {
         method: 'GET',
-        headers: { Accept: 'application/json', Authorization: config.authorization },
+        headers: {
+          Accept: 'application/json',
+          Authorization: config.authorization,
+        },
         signal: controller.signal,
       });
-      if (!response.ok) throw new BadGatewayException(`TOTVS respondeu HTTP ${response.status}`);
-      if (Number(response.headers.get('content-length') || 0) > MAX_RESPONSE_BYTES) {
+      if (!response.ok)
+        throw new BadGatewayException(
+          `TOTVS respondeu HTTP ${response.status}`,
+        );
+      if (
+        Number(response.headers.get('content-length') || 0) > MAX_RESPONSE_BYTES
+      ) {
         throw new BadGatewayException('Resposta TOTVS excedeu o limite');
       }
-      if (!response.body) throw new BadGatewayException('Resposta TOTVS sem corpo');
+      if (!response.body)
+        throw new BadGatewayException('Resposta TOTVS sem corpo');
       const reader = response.body.getReader();
       const chunks: Buffer[] = [];
       let bytes = 0;
@@ -317,16 +536,23 @@ export class TotvsFleetLaborSourceService {
       }
       const body = Buffer.concat(chunks, bytes).toString('utf8');
       let parsed: unknown;
-      try { parsed = JSON.parse(body); } catch {
+      try {
+        parsed = JSON.parse(body);
+      } catch {
         throw new BadGatewayException('Resposta TOTVS nao e JSON valido');
       }
-      const rows = Array.isArray(parsed) ? parsed
-        : Array.isArray((parsed as any)?.value) ? (parsed as any).value
-          : Array.isArray((parsed as any)?.items) ? (parsed as any).items : null;
-      if (!rows) throw new BadGatewayException('Resposta TOTVS nao contem lista JSON');
+      const rows = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray((parsed as any)?.value)
+          ? (parsed as any).value
+          : Array.isArray((parsed as any)?.items)
+            ? (parsed as any).items
+            : null;
+      if (!rows)
+        throw new BadGatewayException('Resposta TOTVS nao contem lista JSON');
       return { rows, bytes };
     } catch (error) {
-      if ((error as any)?.name === 'AbortError') {
+      if (error?.name === 'AbortError') {
         throw new BadGatewayException('Consulta TOTVS excedeu o tempo limite');
       }
       throw error;
@@ -339,21 +565,38 @@ export class TotvsFleetLaborSourceService {
   async stage(requestedById?: string) {
     const config = this.config();
     await this.prisma.totvsFleetLaborSyncRun.updateMany({
-      where: { companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
-        unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId, queryCode: config.code,
-        status: 'RUNNING', startedAt: { lt: new Date(Date.now() - 5 * 60_000) } },
-      data: { status: 'FAILED', finishedAt: new Date(), errorCode: 'ABANDONED_RUN' },
+      where: {
+        companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+        unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+        queryCode: config.code,
+        status: 'RUNNING',
+        startedAt: { lt: new Date(Date.now() - 5 * 60_000) },
+      },
+      data: {
+        status: 'FAILED',
+        finishedAt: new Date(),
+        errorCode: 'ABANDONED_RUN',
+      },
     });
-    let run: Awaited<ReturnType<typeof this.prisma.totvsFleetLaborSyncRun.create>>;
+    let run: Awaited<
+      ReturnType<typeof this.prisma.totvsFleetLaborSyncRun.create>
+    >;
     try {
       run = await this.prisma.totvsFleetLaborSyncRun.create({
-        data: { companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
-          unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId, queryCode: config.code,
-          ruleVersion: FLEET_LABOR_FORMULA_ID, status: 'RUNNING', requestedById },
+        data: {
+          companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+          unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+          queryCode: config.code,
+          ruleVersion: FLEET_LABOR_FORMULA_ID,
+          status: 'RUNNING',
+          requestedById,
+        },
       });
     } catch (error) {
-      if ((error as any)?.code === 'P2002') {
-        throw new ConflictException('Ja existe uma consulta de custos de frota em andamento');
+      if (error?.code === 'P2002') {
+        throw new ConflictException(
+          'Ja existe uma consulta de custos de frota em andamento',
+        );
       }
       throw error;
     }
@@ -361,91 +604,164 @@ export class TotvsFleetLaborSourceService {
       const { rows: sourceRows, bytes } = await this.requestRows(config);
       const prepared = normalizeFleetLaborRows(sourceRows);
       const previous = await this.prisma.totvsFleetLaborSyncRun.findFirst({
-        where: { companyId: run.companyId, unitId: run.unitId, queryCode: config.code,
-          ruleVersion: FLEET_LABOR_FORMULA_ID, sourceHash: prepared.sourceHash,
-          acceptedRows: prepared.rows.length, status: 'STAGED',
+        where: {
+          companyId: run.companyId,
+          unitId: run.unitId,
+          queryCode: config.code,
+          ruleVersion: FLEET_LABOR_FORMULA_ID,
+          sourceHash: prepared.sourceHash,
+          acceptedRows: prepared.rows.length,
+          status: 'STAGED',
           // A matching historical batch is not a fresh 0039 capture for parity.
           finishedAt: { gte: new Date(Date.now() - PARITY_MAX_AGE_MS) },
-          approvals: { none: {} } },
-        orderBy: { startedAt: 'desc' }, select: { id: true },
+          approvals: { none: {} },
+        },
+        orderBy: { startedAt: 'desc' },
+        select: { id: true },
       });
       if (previous) {
         const previousRows = await this.prisma.totvsFleetLaborCost.count({
           where: { syncRunId: previous.id },
         });
         if (previousRows === prepared.rows.length) {
-          await this.prisma.totvsFleetLaborSyncRun.update({ where: { id: run.id },
-            data: { status: 'UNCHANGED', finishedAt: new Date(),
-              receivedRows: sourceRows.length, acceptedRows: prepared.rows.length,
-              responseBytes: bytes, sourceHash: prepared.sourceHash } });
-          return { runId: previous.id, checkRunId: run.id,
-            competences: prepared.competences, queryCode: config.code,
-            formulaId: FLEET_LABOR_FORMULA_ID, rowCount: prepared.rows.length,
-            sourceHash: prepared.sourceHash, status: 'UNCHANGED' };
+          await this.prisma.totvsFleetLaborSyncRun.update({
+            where: { id: run.id },
+            data: {
+              status: 'UNCHANGED',
+              finishedAt: new Date(),
+              receivedRows: sourceRows.length,
+              acceptedRows: prepared.rows.length,
+              responseBytes: bytes,
+              sourceHash: prepared.sourceHash,
+            },
+          });
+          return {
+            runId: previous.id,
+            checkRunId: run.id,
+            competences: prepared.competences,
+            queryCode: config.code,
+            formulaId: FLEET_LABOR_FORMULA_ID,
+            rowCount: prepared.rows.length,
+            sourceHash: prepared.sourceHash,
+            status: 'UNCHANGED',
+          };
         }
       }
-      await this.prisma.$transaction(async (tx) => {
-        for (let offset = 0; offset < prepared.rows.length; offset += 500) {
-          await tx.totvsFleetLaborCost.createMany({
-            data: prepared.rows.slice(offset, offset + 500).map((row) => ({
-              companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
-              unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
-              queryCode: config.code,
-              ruleVersion: FLEET_LABOR_FORMULA_ID,
-              companyCode: row.companyCode,
-              employeeNumber: row.employeeNumber,
-              employeeKey: row.employeeKey,
-              competence: row.competence,
-              period: row.period,
-              totalGeneralRateado: row.totalGeneralRateado,
-              cardinalityOk: row.cardinalityOk,
-              contentHash: row.contentHash,
-              syncRunId: run.id,
-            })),
+      await this.prisma.$transaction(
+        async (tx) => {
+          for (let offset = 0; offset < prepared.rows.length; offset += 500) {
+            await tx.totvsFleetLaborCost.createMany({
+              data: prepared.rows.slice(offset, offset + 500).map((row) => ({
+                companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+                unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+                queryCode: config.code,
+                ruleVersion: FLEET_LABOR_FORMULA_ID,
+                companyCode: row.companyCode,
+                employeeNumber: row.employeeNumber,
+                employeeKey: row.employeeKey,
+                competence: row.competence,
+                period: row.period,
+                totalGeneralRateado: row.totalGeneralRateado,
+                cardinalityOk: row.cardinalityOk,
+                contentHash: row.contentHash,
+                syncRunId: run.id,
+              })),
+            });
+          }
+          await tx.totvsFleetLaborSyncRun.update({
+            where: { id: run.id },
+            data: {
+              status: 'STAGED',
+              finishedAt: new Date(),
+              receivedRows: sourceRows.length,
+              acceptedRows: prepared.rows.length,
+              responseBytes: bytes,
+              sourceHash: prepared.sourceHash,
+            },
           });
-        }
-        await tx.totvsFleetLaborSyncRun.update({ where: { id: run.id },
-          data: { status: 'STAGED', finishedAt: new Date(),
-            receivedRows: sourceRows.length, acceptedRows: prepared.rows.length,
-            responseBytes: bytes, sourceHash: prepared.sourceHash } });
-      }, { timeout: 60_000 });
-      return { runId: run.id, competences: prepared.competences,
-        queryCode: config.code, formulaId: FLEET_LABOR_FORMULA_ID,
+        },
+        { timeout: 60_000 },
+      );
+      return {
+        runId: run.id,
+        competences: prepared.competences,
+        queryCode: config.code,
+        formulaId: FLEET_LABOR_FORMULA_ID,
         rowCount: prepared.rows.length,
-        sourceHash: prepared.sourceHash, status: 'STAGED' };
+        sourceHash: prepared.sourceHash,
+        status: 'STAGED',
+      };
     } catch (error) {
-      await this.prisma.totvsFleetLaborSyncRun.update({ where: { id: run.id },
-        data: { status: 'FAILED', finishedAt: new Date(),
-          errorCode: error instanceof BadRequestException ? 'SOURCE_VALIDATION' : 'SOURCE_FETCH',
-          errorDetail: error instanceof BadRequestException ? error.message : null } });
+      await this.prisma.totvsFleetLaborSyncRun.update({
+        where: { id: run.id },
+        data: {
+          status: 'FAILED',
+          finishedAt: new Date(),
+          errorCode:
+            error instanceof BadRequestException
+              ? 'SOURCE_VALIDATION'
+              : 'SOURCE_FETCH',
+          errorDetail:
+            error instanceof BadRequestException ? error.message : null,
+        },
+      });
       throw error;
     }
   }
 
   async preview(runId: string) {
     const run = await this.prisma.totvsFleetLaborSyncRun.findUnique({
-      where: { id: runId }, select: { id: true, queryCode: true, ruleVersion: true,
-        status: true, acceptedRows: true, sourceHash: true, approvals: {
-          select: { competence: true, approvedAt: true, evidenceRef: true } } },
+      where: { id: runId },
+      select: {
+        id: true,
+        queryCode: true,
+        ruleVersion: true,
+        status: true,
+        acceptedRows: true,
+        sourceHash: true,
+        approvals: {
+          select: { competence: true, approvedAt: true, evidenceRef: true },
+        },
+      },
     });
     if (!run) throw new NotFoundException('Lote de custos nao encontrado');
     const rows = await this.prisma.totvsFleetLaborCost.findMany({
       where: { syncRunId: runId },
-      select: { competence: true, employeeKey: true, period: true,
-        totalGeneralRateado: true, cardinalityOk: true },
+      select: {
+        competence: true,
+        employeeKey: true,
+        period: true,
+        totalGeneralRateado: true,
+        cardinalityOk: true,
+      },
     });
-    const months = [...new Set(rows.map((row) => row.competence.toISOString().slice(0, 7)))];
+    const months = [
+      ...new Set(rows.map((row) => row.competence.toISOString().slice(0, 7))),
+    ];
     const competences = months.map((competence) => {
-      const monthRows = rows.filter((row) => row.competence.toISOString().startsWith(competence));
-      return { competence, rowCount: monthRows.length,
-        distinctEmployees: new Set(monthRows.map((row) => row.employeeKey)).size,
-        totalCost: monthRows.reduce((sum, row) => sum.plus(row.totalGeneralRateado),
-          new Prisma.Decimal(0)).toFixed(6),
-        periods: [...new Set(monthRows.map((row) => row.period))].sort() };
+      const monthRows = rows.filter((row) =>
+        row.competence.toISOString().startsWith(competence),
+      );
+      return {
+        competence,
+        rowCount: monthRows.length,
+        distinctEmployees: new Set(monthRows.map((row) => row.employeeKey))
+          .size,
+        totalCost: monthRows
+          .reduce(
+            (sum, row) => sum.plus(row.totalGeneralRateado),
+            new Prisma.Decimal(0),
+          )
+          .toFixed(6),
+        periods: [...new Set(monthRows.map((row) => row.period))].sort(),
+      };
     });
-    return { ...run, competences,
+    return {
+      ...run,
+      competences,
       rowCount: rows.length,
-      cardinalityOk: rows.every((row) => row.cardinalityOk) };
+      cardinalityOk: rows.every((row) => row.cardinalityOk),
+    };
   }
 
   async readback(competence: string) {
@@ -454,158 +770,306 @@ export class TotvsFleetLaborSourceService {
     }
     const month = new Date(`${competence}-01T00:00:00.000Z`);
     const approval = await this.prisma.totvsFleetLaborApproval.findFirst({
-      where: { companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
-        unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId, competence: month },
-      orderBy: [{ approvedAt: 'desc' }, { id: 'desc' }],
-      select: { id: true, companyId: true, unitId: true, competence: true,
-        syncRunId: true, baselineSyncRunId: true, baselineHash: true,
-        candidateHash: true, parityVerifiedAt: true,
-        sourceHash: true, rowCount: true, totalCost: true,
-        evidenceRef: true, approvedAt: true, reversal: { select: { id: true } },
-        syncRun: { select: { queryCode: true, status: true, sourceHash: true,
-          ruleVersion: true } } },
-    });
-    if (!approval) return { competence, officialReady: false, reason: 'NO_APPROVAL' };
-    if (approval.reversal) return { competence, officialReady: false,
-      reason: 'REVERSED', approvalId: approval.id };
-    const where = { approvalId: approval.id, competence: month,
-      companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
-      unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId, isCurrent: true, active: true,
-      queryCode: FLEET_LABOR_QUERY_CODE,
-      cardinalityOk: true, ruleVersion: FLEET_LABOR_FORMULA_ID };
-    const [totalRows, currentRows, sum] = await Promise.all([
-      this.prisma.totvsFleetLaborCost.count({ where: { approvalId: approval.id } }),
-      this.prisma.totvsFleetLaborCost.count({ where }),
-      this.prisma.totvsFleetLaborCost.aggregate({ where,
-        _sum: { totalGeneralRateado: true } }),
-    ]);
-    const currentTotal = sum._sum.totalGeneralRateado || new Prisma.Decimal(0);
-    const officialReady = totalRows === currentRows &&
-      currentRows === approval.rowCount && currentTotal.equals(approval.totalCost) &&
-      await verifyApprovedFleetLaborIntegrity(this.prisma, approval, {
+      where: {
         companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
         unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
-        queryCode: FLEET_LABOR_QUERY_CODE, ruleVersion: FLEET_LABOR_FORMULA_ID,
-      });
-    return { competence, officialReady, queryCode: approval.syncRun.queryCode,
-      sourceHash: approval.sourceHash, rowCount: approval.rowCount, currentRows,
-      expectedTotal: approval.totalCost.toFixed(6), currentTotal: currentTotal.toFixed(6),
-      approvedAt: approval.approvedAt, evidenceRef: approval.evidenceRef };
+        competence: month,
+      },
+      orderBy: [{ approvedAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        companyId: true,
+        unitId: true,
+        competence: true,
+        syncRunId: true,
+        baselineSyncRunId: true,
+        baselineHash: true,
+        candidateHash: true,
+        parityVerifiedAt: true,
+        sourceHash: true,
+        rowCount: true,
+        totalCost: true,
+        evidenceRef: true,
+        approvedAt: true,
+        reversal: { select: { id: true } },
+        syncRun: {
+          select: {
+            queryCode: true,
+            status: true,
+            sourceHash: true,
+            ruleVersion: true,
+            companyId: true,
+            unitId: true,
+            finishedAt: true,
+          },
+        },
+      },
+    });
+    if (!approval)
+      return { competence, officialReady: false, reason: 'NO_APPROVAL' };
+    if (approval.reversal)
+      return {
+        competence,
+        officialReady: false,
+        reason: 'REVERSED',
+        approvalId: approval.id,
+      };
+    const where = {
+      approvalId: approval.id,
+      competence: month,
+      companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+      unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+      isCurrent: true,
+      active: true,
+      queryCode: FLEET_LABOR_QUERY_CODE,
+      cardinalityOk: true,
+      ruleVersion: FLEET_LABOR_FORMULA_ID,
+    };
+    const [totalRows, currentRows, sum] = await Promise.all([
+      this.prisma.totvsFleetLaborCost.count({
+        where: { approvalId: approval.id },
+      }),
+      this.prisma.totvsFleetLaborCost.count({ where }),
+      this.prisma.totvsFleetLaborCost.aggregate({
+        where,
+        _sum: { totalGeneralRateado: true },
+      }),
+    ]);
+    const currentTotal = sum._sum.totalGeneralRateado || new Prisma.Decimal(0);
+    const officialReady =
+      totalRows === currentRows &&
+      currentRows === approval.rowCount &&
+      currentTotal.equals(approval.totalCost) &&
+      (await verifyApprovedFleetLaborIntegrity(this.prisma, approval, {
+        companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+        unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+        queryCode: FLEET_LABOR_QUERY_CODE,
+        ruleVersion: FLEET_LABOR_FORMULA_ID,
+      }));
+    return {
+      competence,
+      officialReady,
+      queryCode: approval.syncRun.queryCode,
+      sourceHash: approval.sourceHash,
+      rowCount: approval.rowCount,
+      currentRows,
+      expectedTotal: approval.totalCost.toFixed(6),
+      currentTotal: currentTotal.toFixed(6),
+      approvedAt: approval.approvedAt,
+      evidenceRef: approval.evidenceRef,
+    };
   }
 
   // Caller totals are an extra check; the immutable receipt comes from live 0025 parity.
-  async activate(runId: string, expected: {
-    competence: string; sourceHash: string; rowCount: number;
-    totalCost: string; evidenceRef: string;
-  }, approvedById?: string) {
+  async activate(
+    runId: string,
+    expected: {
+      competence: string;
+      sourceHash: string;
+      rowCount: number;
+      totalCost: string;
+      evidenceRef: string;
+    },
+    approvedById?: string,
+  ) {
     if (process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED !== 'true') {
-      throw new ServiceUnavailableException('Ativacao da fonte dedicada ainda nao liberada');
+      throw new ServiceUnavailableException(
+        'Ativacao da fonte dedicada ainda nao liberada',
+      );
     }
-    if (!/^[a-f0-9]{64}$/.test(expected.sourceHash || '') ||
-        !Number.isSafeInteger(expected.rowCount) || expected.rowCount < 1 ||
-        !/^\S[\s\S]{7,499}$/.test(expected.evidenceRef || '')) {
-      throw new BadRequestException('Hash, cardinalidade e referencia da conciliacao sao obrigatorios');
+    if (
+      !/^[a-f0-9]{64}$/.test(expected.sourceHash || '') ||
+      !Number.isSafeInteger(expected.rowCount) ||
+      expected.rowCount < 1 ||
+      !/^\S[\s\S]{7,499}$/.test(expected.evidenceRef || '')
+    ) {
+      throw new BadRequestException(
+        'Hash, cardinalidade e referencia da conciliacao sao obrigatorios',
+      );
     }
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(expected.competence || '')) {
       throw new BadRequestException('Competencia de ativacao invalida');
     }
     const competence = new Date(`${expected.competence}-01T00:00:00.000Z`);
     const total = decimal(String(expected.totalCost || ''));
-    return this.prisma.$transaction(async (tx) => {
-      const run = await tx.totvsFleetLaborSyncRun.findUnique({ where: { id: runId } });
-      if (!run || run.status !== 'STAGED' ||
+    return this.prisma.$transaction(
+      async (tx) => {
+        const run = await tx.totvsFleetLaborSyncRun.findUnique({
+          where: { id: runId },
+        });
+        if (
+          !run ||
+          run.status !== 'STAGED' ||
           run.queryCode !== FLEET_LABOR_QUERY_CODE ||
           run.ruleVersion !== FLEET_LABOR_FORMULA_ID ||
           run.companyId !== USINA_ASPHALT_TEAM_CONTEXT.companyId ||
-          run.unitId !== USINA_ASPHALT_TEAM_CONTEXT.unitId) {
-        throw new ConflictException('Lote inexistente ou nao preparado');
-      }
-      const existing = await tx.totvsFleetLaborApproval.findUnique({ where: {
-        companyId_unitId_competence_syncRunId: {
-          companyId: run.companyId, unitId: run.unitId, competence, syncRunId: run.id,
-        },
-      }, include: { syncRun: true, reversal: { select: { id: true } } } });
-      if (existing) {
-        const intact = await verifyApprovedFleetLaborIntegrity(tx, existing, {
-          companyId: run.companyId, unitId: run.unitId,
-          queryCode: FLEET_LABOR_QUERY_CODE, ruleVersion: FLEET_LABOR_FORMULA_ID,
-        });
-        if (!intact) {
-          throw new ConflictException('Lote aprovado anteriormente, mas ja substituido');
+          run.unitId !== USINA_ASPHALT_TEAM_CONTEXT.unitId
+        ) {
+          throw new ConflictException('Lote inexistente ou nao preparado');
         }
-        return { approvalId: existing.id,
-          competence: competence.toISOString().slice(0, 7), alreadyActive: true };
-      }
-      const parity = await this.evaluateParity(tx, runId, competence);
-      if (!parity.report.matching) {
-        throw new ConflictException(`Paridade 0025/0039 divergente: ${parity.report.issueCount} ocorrencias; consulte o relatorio do lote`);
-      }
-      const actualTotal = new Prisma.Decimal(parity.report.candidateTotal);
-      if (run.sourceHash !== expected.sourceHash ||
+        const existing = await tx.totvsFleetLaborApproval.findUnique({
+          where: {
+            companyId_unitId_competence_syncRunId: {
+              companyId: run.companyId,
+              unitId: run.unitId,
+              competence,
+              syncRunId: run.id,
+            },
+          },
+          include: { syncRun: true, reversal: { select: { id: true } } },
+        });
+        if (existing) {
+          const intact = await verifyApprovedFleetLaborIntegrity(tx, existing, {
+            companyId: run.companyId,
+            unitId: run.unitId,
+            queryCode: FLEET_LABOR_QUERY_CODE,
+            ruleVersion: FLEET_LABOR_FORMULA_ID,
+          });
+          if (!intact) {
+            throw new ConflictException(
+              'Lote aprovado anteriormente, mas ja substituido',
+            );
+          }
+          return {
+            approvalId: existing.id,
+            competence: competence.toISOString().slice(0, 7),
+            alreadyActive: true,
+          };
+        }
+        const parity = await this.evaluateParity(tx, runId, competence);
+        if (!parity.report.matching) {
+          throw new ConflictException(
+            `Paridade 0025/0039 divergente: ${parity.report.issueCount} ocorrencias; consulte o relatorio do lote`,
+          );
+        }
+        const actualTotal = new Prisma.Decimal(parity.report.candidateTotal);
+        if (
+          run.sourceHash !== expected.sourceHash ||
           parity.report.candidateRows !== expected.rowCount ||
-          !actualTotal.equals(total)) {
-        throw new ConflictException('Lote diverge dos totais informados');
-      }
-      await tx.totvsFleetLaborCost.updateMany({
-        where: { companyId: run.companyId, unitId: run.unitId, competence,
-          isCurrent: true, active: true },
-        data: { isCurrent: false },
-      });
-      const approval = await tx.totvsFleetLaborApproval.create({ data: {
-        companyId: run.companyId, unitId: run.unitId, competence, syncRunId: run.id,
-        sourceHash: run.sourceHash!, rowCount: parity.report.candidateRows,
-        totalCost: actualTotal, evidenceRef: expected.evidenceRef,
-        baselineSyncRunId: parity.baselineRun.id,
-        baselineHash: parity.report.baselineHash,
-        candidateHash: parity.candidateHash,
-        parityVerifiedAt: new Date(), approvedById,
-      } });
-      const applied = await tx.totvsFleetLaborCost.updateMany({
-        where: { syncRunId: run.id, competence, approvalId: null, isCurrent: false },
-        data: { isCurrent: true, approvalId: approval.id } });
-      if (applied.count !== parity.report.candidateRows) {
-        throw new ConflictException('Lote alterado durante a ativacao');
-      }
-      return { approvalId: approval.id, competence: competence.toISOString().slice(0, 7),
-        alreadyActive: false, baselineRunId: parity.baselineRun.id,
-        parityHash: parity.report.baselineHash };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60_000 });
+          !actualTotal.equals(total)
+        ) {
+          throw new ConflictException('Lote diverge dos totais informados');
+        }
+        await tx.totvsFleetLaborCost.updateMany({
+          where: {
+            companyId: run.companyId,
+            unitId: run.unitId,
+            competence,
+            isCurrent: true,
+            active: true,
+          },
+          data: { isCurrent: false },
+        });
+        const approval = await tx.totvsFleetLaborApproval.create({
+          data: {
+            companyId: run.companyId,
+            unitId: run.unitId,
+            competence,
+            syncRunId: run.id,
+            sourceHash: run.sourceHash,
+            rowCount: parity.report.candidateRows,
+            totalCost: actualTotal,
+            evidenceRef: expected.evidenceRef,
+            baselineSyncRunId: parity.baselineRun.id,
+            baselineHash: parity.report.baselineHash,
+            candidateHash: parity.candidateHash,
+            parityVerifiedAt: new Date(),
+            approvedById,
+          },
+        });
+        const applied = await tx.totvsFleetLaborCost.updateMany({
+          where: {
+            syncRunId: run.id,
+            competence,
+            approvalId: null,
+            isCurrent: false,
+          },
+          data: { isCurrent: true, approvalId: approval.id },
+        });
+        if (applied.count !== parity.report.candidateRows) {
+          throw new ConflictException('Lote alterado durante a ativacao');
+        }
+        return {
+          approvalId: approval.id,
+          competence: competence.toISOString().slice(0, 7),
+          alreadyActive: false,
+          baselineRunId: parity.baselineRun.id,
+          parityHash: parity.report.baselineHash,
+        };
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        timeout: 60_000,
+      },
+    );
   }
 
-  async reverse(approvalId: string, reasonInput: string, reversedById?: string) {
+  async reverse(
+    approvalId: string,
+    reasonInput: string,
+    reversedById?: string,
+  ) {
     if (process.env.TOTVS_RM_FLEET_LABOR_ACTIVATION_ENABLED !== 'true') {
-      throw new ServiceUnavailableException('Reversao da fonte dedicada ainda nao liberada');
+      throw new ServiceUnavailableException(
+        'Reversao da fonte dedicada ainda nao liberada',
+      );
     }
     const reason = String(reasonInput || '').trim();
     if (reason.length < 12 || reason.length > 500) {
-      throw new BadRequestException('Justificativa da reversao deve ter entre 12 e 500 caracteres');
+      throw new BadRequestException(
+        'Justificativa da reversao deve ter entre 12 e 500 caracteres',
+      );
     }
-    return this.prisma.$transaction(async (tx) => {
-      const approval = await tx.totvsFleetLaborApproval.findUnique({
-        where: { id: approvalId }, include: { reversal: true },
-      });
-      if (!approval || approval.companyId !== USINA_ASPHALT_TEAM_CONTEXT.companyId ||
-          approval.unitId !== USINA_ASPHALT_TEAM_CONTEXT.unitId) {
-        throw new NotFoundException('Aprovacao de custos nao encontrada');
-      }
-      if (approval.reversal) return { approvalId, reversalId: approval.reversal.id,
-        alreadyReversed: true };
-      const latest = await tx.totvsFleetLaborApproval.findFirst({
-        where: { companyId: approval.companyId, unitId: approval.unitId,
-          competence: approval.competence },
-        orderBy: [{ approvedAt: 'desc' }, { id: 'desc' }], select: { id: true },
-      });
-      if (latest?.id !== approvalId) {
-        throw new ConflictException('Apenas a aprovacao vigente pode ser revertida');
-      }
-      const reversal = await tx.totvsFleetLaborReversal.create({ data: {
-        approvalId, reason, reversedById,
-      } });
-      await tx.totvsFleetLaborCost.updateMany({
-        where: { approvalId, isCurrent: true, active: true },
-        data: { isCurrent: false },
-      });
-      return { approvalId, reversalId: reversal.id, alreadyReversed: false };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
+    return this.prisma.$transaction(
+      async (tx) => {
+        const approval = await tx.totvsFleetLaborApproval.findUnique({
+          where: { id: approvalId },
+          include: { reversal: true },
+        });
+        if (
+          !approval ||
+          approval.companyId !== USINA_ASPHALT_TEAM_CONTEXT.companyId ||
+          approval.unitId !== USINA_ASPHALT_TEAM_CONTEXT.unitId
+        ) {
+          throw new NotFoundException('Aprovacao de custos nao encontrada');
+        }
+        if (approval.reversal)
+          return {
+            approvalId,
+            reversalId: approval.reversal.id,
+            alreadyReversed: true,
+          };
+        const latest = await tx.totvsFleetLaborApproval.findFirst({
+          where: {
+            companyId: approval.companyId,
+            unitId: approval.unitId,
+            competence: approval.competence,
+          },
+          orderBy: [{ approvedAt: 'desc' }, { id: 'desc' }],
+          select: { id: true },
+        });
+        if (latest?.id !== approvalId) {
+          throw new ConflictException(
+            'Apenas a aprovacao vigente pode ser revertida',
+          );
+        }
+        const reversal = await tx.totvsFleetLaborReversal.create({
+          data: {
+            approvalId,
+            reason,
+            reversedById,
+          },
+        });
+        await tx.totvsFleetLaborCost.updateMany({
+          where: { approvalId, isCurrent: true, active: true },
+          data: { isCurrent: false },
+        });
+        return { approvalId, reversalId: reversal.id, alreadyReversed: false };
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        timeout: 30_000,
+      },
+    );
   }
 }

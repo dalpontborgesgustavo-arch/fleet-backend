@@ -3002,6 +3002,7 @@ model TotvsEmployeeSyncRun {
   updatedAt         DateTime                     @updatedAt @db.Timestamptz(6)
   employeeSnapshots TotvsEmployeeSnapshot[]
   costAggregates    TotvsEmployeeCostAggregate[]
+  costRunManifests TotvsEmployeeCostRunManifest[]
   fleetLaborParityApprovals TotvsFleetLaborApproval[]
 
   @@index([companyId, unitId, startedAt])
@@ -3068,11 +3069,40 @@ model TotvsEmployeeCostAggregate {
   createdAt            DateTime             @default(now()) @db.Timestamptz(6)
   updatedAt            DateTime             @updatedAt @db.Timestamptz(6)
   syncRun              TotvsEmployeeSyncRun @relation(fields: [syncRunId], references: [id], onDelete: Restrict)
+  runMemberships       TotvsEmployeeCostRunMembership[]
 
   @@unique([companyId, unitId, employeeKey, competence, period, version], map: "TotvsEmployeeCostAggregate_scope_version_key")
   @@index([companyId, unitId, competence, isCurrent, active], map: "TotvsEmployeeCostAggregate_current_idx")
   @@index([employeeKey, competence, period])
   @@index([syncRunId])
+}
+
+model TotvsEmployeeCostRunManifest {
+  id          String                           @id @default(uuid())
+  syncRunId   String
+  competence  DateTime                         @db.Date
+  rowCount    Int
+  contentHash String
+  createdAt   DateTime                         @default(now()) @db.Timestamptz(6)
+  syncRun     TotvsEmployeeSyncRun             @relation(fields: [syncRunId], references: [id], onDelete: Restrict)
+  memberships TotvsEmployeeCostRunMembership[]
+
+  @@unique([syncRunId, competence], map: "TotvsEmployeeCostRunManifest_run_competence_key")
+  @@index([syncRunId])
+  @@index([competence])
+}
+
+model TotvsEmployeeCostRunMembership {
+  id          String                       @id @default(uuid())
+  manifestId  String
+  aggregateId String
+  observedAt  DateTime                     @default(now()) @db.Timestamptz(6)
+  manifest    TotvsEmployeeCostRunManifest @relation(fields: [manifestId], references: [id], onDelete: Restrict)
+  aggregate   TotvsEmployeeCostAggregate   @relation(fields: [aggregateId], references: [id], onDelete: Restrict)
+
+  @@unique([manifestId, aggregateId], map: "TotvsEmployeeCostRunMembership_manifest_aggregate_key")
+  @@index([manifestId])
+  @@index([aggregateId])
 }
 
 // Staged labor cost using the JR-approved IND.BI.0025 rateio for Resultados Frota only. The existing

@@ -1,5 +1,33 @@
 -- Runs only in the disposable CI migration-rehearsal database.
-INSERT INTO "TotvsEmployeeSyncRun" ("id") VALUES ('fleet-labor-baseline-test');
+INSERT INTO "TotvsEmployeeSyncRun" (
+    "id", "companyId", "unitId", "queryCode", "contextCode", "status"
+) VALUES (
+    'fleet-labor-baseline-test', 'JR_TEST', 'UNIT_TEST',
+    'IND.BI.0025', '0/P', 'RUNNING'
+), (
+    'fleet-labor-baseline-wrong-query', 'JR_TEST', 'UNIT_TEST',
+    'IND.BI.0039', '0/P', 'RUNNING'
+);
+INSERT INTO "TotvsEmployeeCostAggregate" (
+    "id", "companyId", "unitId", "source", "queryCode", "competence"
+) VALUES (
+    'fleet-labor-baseline-aggregate-test', 'JR_TEST', 'UNIT_TEST',
+    'TOTVS_RM', 'IND.BI.0025', DATE '2026-09-01'
+), (
+    'fleet-labor-baseline-late-test', 'JR_TEST', 'UNIT_TEST',
+    'TOTVS_RM', 'IND.BI.0025', DATE '2026-09-01'
+);
+INSERT INTO "TotvsEmployeeCostRunManifest" (
+    "id", "syncRunId", "competence", "rowCount", "contentHash"
+) VALUES (
+    'fleet-labor-manifest-test', 'fleet-labor-baseline-test',
+    DATE '2026-09-01', 1, repeat('a', 64)
+);
+INSERT INTO "TotvsEmployeeCostRunMembership" ("id", "manifestId", "aggregateId")
+VALUES ('fleet-labor-membership-test', 'fleet-labor-manifest-test',
+    'fleet-labor-baseline-aggregate-test');
+UPDATE "TotvsEmployeeSyncRun" SET "status" = 'SUCCEEDED'
+WHERE "id" = 'fleet-labor-baseline-test';
 INSERT INTO "TotvsFleetLaborSyncRun" (
     "id", "companyId", "unitId", "queryCode", "ruleVersion", "status",
     "finishedAt", "acceptedRows", "sourceHash"
@@ -31,6 +59,58 @@ DO $$
 DECLARE
     blocked BOOLEAN := false;
 BEGIN
+    BEGIN
+        INSERT INTO "TotvsEmployeeCostRunManifest" (
+            "id", "syncRunId", "competence", "rowCount", "contentHash"
+        ) VALUES (
+            'fleet-labor-manifest-wrong-query',
+            'fleet-labor-baseline-wrong-query', DATE '2026-09-01', 0,
+            repeat('b', 64)
+        );
+    EXCEPTION WHEN raise_exception THEN
+        blocked := SQLERRM = 'TOTVS employee cost manifest requires a running 0025 run';
+    END;
+    IF NOT blocked THEN RAISE EXCEPTION 'Non-0025 manifest was not blocked'; END IF;
+
+    blocked := false;
+    BEGIN
+        INSERT INTO "TotvsEmployeeCostRunMembership" ("id", "manifestId", "aggregateId")
+        VALUES ('fleet-labor-membership-late-test', 'fleet-labor-manifest-test',
+            'fleet-labor-baseline-late-test');
+    EXCEPTION WHEN raise_exception THEN
+        blocked := SQLERRM = 'TOTVS employee cost membership must match its running 0025 manifest';
+    END;
+    IF NOT blocked THEN RAISE EXCEPTION 'Late 0025 membership was not blocked'; END IF;
+
+    blocked := false;
+    BEGIN
+        UPDATE "TotvsEmployeeCostRunManifest" SET "rowCount" = 2
+        WHERE "id" = 'fleet-labor-manifest-test';
+    EXCEPTION WHEN raise_exception THEN
+        blocked := SQLERRM = 'TOTVS employee cost run manifests are immutable';
+    END;
+    IF NOT blocked THEN RAISE EXCEPTION '0025 run manifest mutation was not blocked'; END IF;
+
+    blocked := false;
+    BEGIN
+        UPDATE "TotvsEmployeeCostRunMembership"
+        SET "aggregateId" = 'tampered'
+        WHERE "id" = 'fleet-labor-membership-test';
+    EXCEPTION WHEN raise_exception THEN
+        blocked := SQLERRM = 'TOTVS employee cost run memberships are immutable';
+    END;
+    IF NOT blocked THEN RAISE EXCEPTION '0025 run membership mutation was not blocked'; END IF;
+
+    blocked := false;
+    BEGIN
+        DELETE FROM "TotvsEmployeeCostRunMembership"
+        WHERE "id" = 'fleet-labor-membership-test';
+    EXCEPTION WHEN raise_exception THEN
+        blocked := SQLERRM = 'TOTVS employee cost run memberships are immutable';
+    END;
+    IF NOT blocked THEN RAISE EXCEPTION '0025 run membership deletion was not blocked'; END IF;
+
+    blocked := false;
     BEGIN
         UPDATE "TotvsFleetLaborCost" SET "totalGeneralRateado" = 101
         WHERE "id" = 'fleet-labor-cost-test';
