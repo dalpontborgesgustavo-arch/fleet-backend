@@ -42,10 +42,9 @@ export function canReadFleetLaborCost(user: { role?: string; sub?: string }) {
   return Boolean(user.sub && explicitIds.includes(String(user.sub)));
 }
 
-// Group totals for one or two workers disclose individual payroll by inference.
-// This endpoint deliberately has no overall labor total from which a suppressed
-// group's value could be reconstructed by subtraction.
-export function suppressSmallLaborGroups<
+// Show the cost of every group to authorized labor-cost viewers, including
+// groups with one or two workers. Keep the separate role/user access check.
+export function restrictLaborGroups<
   T extends {
     laborActual: string | null;
     valuedEmployeeCount: number;
@@ -61,16 +60,7 @@ export function suppressSmallLaborGroups<
         privacySuppressed: true,
       };
     }
-    const privacySuppressed =
-      group.laborActual !== null && group.valuedEmployeeCount < 3;
-    return privacySuppressed
-      ? {
-          ...group,
-          laborActual: null,
-          costStatus: 'PRIVACY_SUPPRESSED',
-          privacySuppressed: true,
-        }
-      : { ...group, privacySuppressed: false };
+    return { ...group, privacySuppressed: false };
   });
 }
 
@@ -170,7 +160,7 @@ export class LucasFleetActualsController {
         `${unmappedRevenue.length} veiculo(s) com faturamento no Aethos ainda nao possuem vinculo com o cadastro JR; esses valores nao entram nos grupos da previa.`,
       );
     }
-    const publicLaborGroups = suppressSmallLaborGroups(
+    const publicLaborGroups = restrictLaborGroups(
       labor.groupLaborActuals,
       canReadFleetLaborCost(req.user || {}),
     );
