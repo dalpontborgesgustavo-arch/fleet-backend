@@ -57,6 +57,35 @@ function chunks<T>(values: T[], size = 500) {
   return result;
 }
 
+function missingVersionBatches(
+  groups: Map<string, NormalizedRow[]>,
+  currentKeys: Set<string>,
+) {
+  const scopes = new Map<
+    string,
+    { competence: Date; period: number; employeeKeys: Set<string> }
+  >();
+  for (const [key, rows] of groups) {
+    if (currentKeys.has(key)) continue;
+    const first = rows[0];
+    const scopeKey = `${dateKey(first.competence)}|${first.period}`;
+    const scope = scopes.get(scopeKey) || {
+      competence: first.competence,
+      period: first.period,
+      employeeKeys: new Set<string>(),
+    };
+    scope.employeeKeys.add(first.employeeKey);
+    scopes.set(scopeKey, scope);
+  }
+  return [...scopes.values()].flatMap((scope) =>
+    chunks([...scope.employeeKeys]).map((employeeKeys) => ({
+      competence: scope.competence,
+      period: scope.period,
+      employeeKeys,
+    })),
+  );
+}
+
 function recentClosedCompetences(now = new Date()) {
   const currentMonth = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
@@ -486,6 +515,73 @@ export class TotvsEmployeeIntegrationService {
         );
       }
 
+      // A key retired after a confirmed source removal may later reappear.
+      // Query historical maxima only for incoming keys without a current row;
+      // reusing version 1 would collide with the immutable historical version.
+      const [historicalEmployeeVersions, historicalAggregateVersions] =
+        await Promise.all([
+          (async () => {
+            const versions = new Map<string, number>();
+            for (const batch of missingVersionBatches(
+              groups,
+              new Set(currentEmployeeByKey.keys()),
+            )) {
+              const rows = await this.prisma.totvsEmployeeSnapshot.groupBy({
+                by: ['employeeKey'],
+                where: {
+                  companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+                  unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+                  source: SOURCE,
+                  queryCode: QUERY_CODE,
+                  competence: batch.competence,
+                  period: batch.period,
+                  employeeKey: { in: batch.employeeKeys },
+                },
+                _max: { version: true },
+              });
+              for (const row of rows) {
+                if (row._max.version !== null)
+                  versions.set(
+                    `${row.employeeKey}|${dateKey(batch.competence)}|${batch.period}`,
+                    row._max.version,
+                  );
+              }
+            }
+            return versions;
+          })(),
+          (async () => {
+            const versions = new Map<string, number>();
+            for (const batch of missingVersionBatches(
+              groups,
+              new Set(currentAggregateByKey.keys()),
+            )) {
+              const rows = await this.prisma.totvsEmployeeCostAggregate.groupBy(
+                {
+                  by: ['employeeKey'],
+                  where: {
+                    companyId: USINA_ASPHALT_TEAM_CONTEXT.companyId,
+                    unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
+                    source: SOURCE,
+                    queryCode: QUERY_CODE,
+                    competence: batch.competence,
+                    period: batch.period,
+                    employeeKey: { in: batch.employeeKeys },
+                  },
+                  _max: { version: true },
+                },
+              );
+              for (const row of rows) {
+                if (row._max.version !== null)
+                  versions.set(
+                    `${row.employeeKey}|${dateKey(batch.competence)}|${batch.period}`,
+                    row._max.version,
+                  );
+              }
+            }
+            return versions;
+          })(),
+        ]);
+
       for (const [key, rows] of groups) {
         const first = rows[0];
         const employeeData = {
@@ -517,7 +613,11 @@ export class TotvsEmployeeIntegrationService {
             employeeKey: first.employeeKey,
             competence: first.competence,
             period: first.period,
-            version: (currentEmployee?.version || 0) + 1,
+            version:
+              Math.max(
+                currentEmployee?.version || 0,
+                historicalEmployeeVersions.get(key) || 0,
+              ) + 1,
             displayName: first.displayName,
             jobName: first.jobName,
             departmentName: first.departmentName,
@@ -579,7 +679,11 @@ export class TotvsEmployeeIntegrationService {
             employeeKey: first.employeeKey,
             competence: first.competence,
             period: first.period,
-            version: (currentAggregate?.version || 0) + 1,
+            version:
+              Math.max(
+                currentAggregate?.version || 0,
+                historicalAggregateVersions.get(key) || 0,
+              ) + 1,
             sourceRows: aggregateData.sourceRows,
             allocationRows: aggregateData.allocationRows,
             fixedAllocationValue,

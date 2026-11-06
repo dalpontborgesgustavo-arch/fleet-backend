@@ -226,6 +226,87 @@ describe('manifesto por run da IND.BI.0025', () => {
     });
   });
 
+  it('reaparecimento de chave aposentada usa a proxima versao nos dois historicos', async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            CODCOLIGADA: '1',
+            CHAPA: '0001',
+            FK_FUNCIONARIO: '1-0001',
+            NOME: 'Funcionario 1',
+            DT_MES: '2026-09-01',
+            NROPERIODO: 20,
+            'PFRATEIOFIXO.VALOR': '1',
+            'TOTAL GERAL LINHA': '100',
+          },
+        ]),
+      ),
+    );
+    const historicalVersion = [{ employeeKey: '1-0001', _max: { version: 1 } }];
+    const tx = {
+      totvsEmployeeSnapshot: {
+        updateMany: jest.fn(),
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      totvsEmployeeCostAggregate: {
+        updateMany: jest.fn(),
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      totvsEmployeeCostRunManifest: {
+        createMany: jest.fn().mockResolvedValue({ count: 2 }),
+      },
+      totvsEmployeeCostRunMembership: {
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = {
+      totvsEmployeeSyncRun: {
+        create: jest.fn().mockResolvedValue({ id: 'reappearance-run' }),
+        update: jest.fn().mockImplementation(({ data }) => Promise.resolve(data)),
+      },
+      totvsEmployeeSnapshot: {
+        findMany: jest.fn().mockResolvedValue([]),
+        groupBy: jest.fn().mockResolvedValue(historicalVersion),
+      },
+      totvsEmployeeCostAggregate: {
+        findMany: jest.fn().mockResolvedValue([]),
+        groupBy: jest.fn().mockResolvedValue(historicalVersion),
+      },
+      $transaction: jest.fn().mockImplementation(async (callback) => callback(tx)),
+    };
+    const service = new TotvsEmployeeIntegrationService(
+      prisma as unknown as PrismaService,
+    );
+
+    await service.refresh('admin-1');
+
+    expect(prisma.totvsEmployeeSnapshot.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          competence: new Date('2026-09-01T00:00:00.000Z'),
+          period: 20,
+          employeeKey: { in: ['1-0001'] },
+        }),
+      }),
+    );
+    expect(prisma.totvsEmployeeCostAggregate.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          competence: new Date('2026-09-01T00:00:00.000Z'),
+          period: 20,
+          employeeKey: { in: ['1-0001'] },
+        }),
+      }),
+    );
+    expect(tx.totvsEmployeeSnapshot.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ version: 2, employeeKey: '1-0001' })],
+    });
+    expect(tx.totvsEmployeeCostAggregate.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ version: 2, employeeKey: '1-0001' })],
+    });
+  });
+
   it.each([
     {
       caseName: 'mes anteriormente populado agora vazio',
