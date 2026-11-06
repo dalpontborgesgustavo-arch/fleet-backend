@@ -168,6 +168,64 @@ describe('manifesto por run da IND.BI.0025', () => {
     expect(result.replayed).toBe(true);
   });
 
+  it('falha sem gravar agregados quando parte da resposta da 0025 e invalida', async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            CODCOLIGADA: '1',
+            CHAPA: '0001',
+            FK_FUNCIONARIO: '1-0001',
+            NOME: 'Funcionario 1',
+            DT_MES: '2026-09-01',
+            NROPERIODO: 20,
+            'PFRATEIOFIXO.VALOR': '1',
+            'TOTAL GERAL LINHA': '100',
+          },
+          {
+            CODCOLIGADA: '1',
+            CHAPA: '0002',
+            FK_FUNCIONARIO: '1-0002',
+            NOME: 'Funcionario 2',
+            DT_MES: '2026-09-01',
+            NROPERIODO: 99,
+            'PFRATEIOFIXO.VALOR': '1',
+            'TOTAL GERAL LINHA': '200',
+          },
+        ]),
+      ),
+    );
+    const updateRun = jest
+      .fn()
+      .mockImplementation(({ data }) => Promise.resolve(data));
+    const prisma = {
+      totvsEmployeeSyncRun: {
+        create: jest.fn().mockResolvedValue({ id: 'partial-run' }),
+        update: updateRun,
+      },
+      totvsEmployeeSnapshot: { findMany: jest.fn() },
+      totvsEmployeeCostAggregate: { findMany: jest.fn() },
+      $transaction: jest.fn(),
+    };
+    const service = new TotvsEmployeeIntegrationService(
+      prisma as unknown as PrismaService,
+    );
+
+    await expect(service.refresh('admin-1')).rejects.toBeInstanceOf(
+      BadGatewayException,
+    );
+    expect(prisma.totvsEmployeeSnapshot.findMany).not.toHaveBeenCalled();
+    expect(prisma.totvsEmployeeCostAggregate.findMany).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(updateRun).toHaveBeenCalledWith({
+      where: { id: 'partial-run' },
+      data: expect.objectContaining({
+        status: 'FAILED',
+        errorDetail: expect.stringContaining('1 linha(s) invalida(s)'),
+      }),
+    });
+  });
+
   it.each([
     {
       caseName: 'mes anteriormente populado agora vazio',

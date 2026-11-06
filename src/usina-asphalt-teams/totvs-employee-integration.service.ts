@@ -377,6 +377,10 @@ export class TotvsEmployeeIntegrationService {
         throw new BadGatewayException(
           'Nenhuma linha valida retornada pela IND.BI.0025',
         );
+      if (rejectedRows > 0)
+        throw new BadGatewayException(
+          `IND.BI.0025 retornou ${rejectedRows} linha(s) invalida(s); nenhum agregado foi alterado`,
+        );
       const groups = new Map<string, NormalizedRow[]>();
       for (const item of normalized) {
         const key = `${item.employeeKey}|${dateKey(item.competence)}|${item.period}`;
