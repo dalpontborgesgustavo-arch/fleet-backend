@@ -6,8 +6,8 @@ const row = (competence: string, employeeNumber: string, period = 20,
   total = '100.00') => ({
   CODCOLIGADA: '1', CHAPA: employeeNumber, FK_FUNCIONARIO: `1-${employeeNumber}`,
   DT_MES: `${competence}-01T00:00:00`, NROPERIODO: period,
-  TOTAL_GERAL_INTEGRAL: total, CARDINALIDADE_OK: 1,
-  FORMULA_ID: 'IND.BI.0025_INTEGRAL_V1',
+  TOTAL_GERAL_RATEADO: total, CARDINALIDADE_OK: 1,
+  FORMULA_ID: 'IND.BI.0025_RATEADO_V1',
 });
 
 describe('fonte isolada de mao de obra de Resultados Frota', () => {
@@ -27,7 +27,7 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
   it('rejeita cardinalidade nao reconciliada e total nulo', () => {
     expect(() => normalizeFleetLaborRows([
       { ...row('2026-09', '0001'), CARDINALIDADE_OK: 0,
-        TOTAL_GERAL_INTEGRAL: null },
+        TOTAL_GERAL_RATEADO: null },
     ])).toThrow();
   });
 
@@ -47,6 +47,21 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
     expect(() => normalizeFleetLaborRows([
       { ...row('2026-10', '0001'), FORMULA_ID: 'IND.BI.0025' },
     ])).toThrow(/Formula/);
+  });
+
+  it('rejeita o antigo rascunho integral mesmo se ele alegar cardinalidade valida', () => {
+    expect(() => normalizeFleetLaborRows([{
+      ...row('2026-10', '0001'), FORMULA_ID: 'IND.BI.0025_INTEGRAL_V1',
+    }])).toThrow(/Formula/);
+    expect(() => normalizeFleetLaborRows([{
+      ...row('2026-10', '0001'), TOTAL_GERAL_RATEADO: null,
+    }])).toThrow(/TOTAL_GERAL_RATEADO/);
+  });
+
+  it('rejeita colunas extras, inclusive do rascunho integral', () => {
+    expect(() => normalizeFleetLaborRows([{
+      ...row('2026-10', '0001'), TOTAL_GERAL_INTEGRAL: '100.00',
+    }])).toThrow(/Colunas/);
   });
 
   it('rejeita competencia ainda nao encerrada', () => {
@@ -128,14 +143,14 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
       totvsFleetLaborSyncRun: { findUnique: jest.fn().mockResolvedValue({
         id: 'run-1', status: 'STAGED', companyId: 'JR_CONSTRUCOES',
         unitId: 'USINA_ASFALTO_ICARA', sourceHash: 'a'.repeat(64),
-        queryCode: 'IND.BI.0039', ruleVersion: 'IND.BI.0025_INTEGRAL_V1',
+        queryCode: 'IND.BI.0039', ruleVersion: 'IND.BI.0025_RATEADO_V1',
       }) },
       totvsFleetLaborCost: {
         findMany: jest.fn().mockResolvedValue([{ id: rowId,
           competence: new Date('2026-09-01T00:00:00.000Z'),
           employeeKey: '1-0001', period: 20,
-          totalGeneralIntegral: new Prisma.Decimal('100.00'), cardinalityOk: true,
-          ruleVersion: 'IND.BI.0025_INTEGRAL_V1' }]),
+          totalGeneralRateado: new Prisma.Decimal('100.00'), cardinalityOk: true,
+          ruleVersion: 'IND.BI.0025_RATEADO_V1' }]),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       totvsFleetLaborApproval: {
@@ -172,14 +187,14 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
       totvsFleetLaborSyncRun: { findUnique: jest.fn().mockResolvedValue({
         id: 'old-run', status: 'STAGED', companyId: 'JR_CONSTRUCOES',
         unitId: 'USINA_ASFALTO_ICARA', sourceHash: 'b'.repeat(64),
-        queryCode: 'IND.BI.0039', ruleVersion: 'IND.BI.0025_INTEGRAL_V1',
+        queryCode: 'IND.BI.0039', ruleVersion: 'IND.BI.0025_RATEADO_V1',
       }) },
       totvsFleetLaborCost: {
         findMany: jest.fn().mockResolvedValue([{ id: 'row-old',
           competence: new Date('2026-09-01T00:00:00.000Z'),
           employeeKey: '1-0001', period: 20,
-          totalGeneralIntegral: new Prisma.Decimal('100.00'), cardinalityOk: true,
-          ruleVersion: 'IND.BI.0025_INTEGRAL_V1' }]),
+          totalGeneralRateado: new Prisma.Decimal('100.00'), cardinalityOk: true,
+          ruleVersion: 'IND.BI.0025_RATEADO_V1' }]),
         count: jest.fn().mockResolvedValue(0),
         updateMany: jest.fn(),
       },
@@ -220,14 +235,14 @@ describe('fonte isolada de mao de obra de Resultados Frota', () => {
         totalCost: new Prisma.Decimal('100.00'),
         evidenceRef: 'parity-report-2026-09-reviewed', approvedAt: new Date(),
         syncRun: { queryCode: 'IND.BI.0039', status: 'STAGED',
-          sourceHash: 'c'.repeat(64), ruleVersion: 'IND.BI.0025_INTEGRAL_V1' },
+          sourceHash: 'c'.repeat(64), ruleVersion: 'IND.BI.0025_RATEADO_V1' },
       }) },
       totvsFleetLaborCost: {
         count: jest.fn().mockResolvedValue(1),
         aggregate: jest.fn().mockResolvedValueOnce({
-          _sum: { totalGeneralIntegral: new Prisma.Decimal('100.00') },
+          _sum: { totalGeneralRateado: new Prisma.Decimal('100.00') },
         }).mockResolvedValueOnce({
-          _sum: { totalGeneralIntegral: new Prisma.Decimal('99.00') },
+          _sum: { totalGeneralRateado: new Prisma.Decimal('99.00') },
         }),
       },
     };

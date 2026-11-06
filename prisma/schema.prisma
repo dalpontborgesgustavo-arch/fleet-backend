@@ -3074,7 +3074,7 @@ model TotvsEmployeeCostAggregate {
   @@index([syncRunId])
 }
 
-// Staged, unallocated labor cost for Resultados Frota only. The existing
+// Staged labor cost using the JR-approved IND.BI.0025 rateio for Resultados Frota only. The existing
 // IND.BI.0025 employee snapshot and cost aggregate remain independent.
 model TotvsFleetLaborSyncRun {
   id             String                    @id @default(uuid())
@@ -3131,7 +3131,7 @@ model TotvsFleetLaborCost {
   employeeKey          String
   competence           DateTime                  @db.Date
   period               Int
-  totalGeneralIntegral Decimal                   @db.Decimal(28, 6)
+  totalGeneralRateado  Decimal                   @db.Decimal(28, 6)
   cardinalityOk        Boolean
   contentHash          String
   isCurrent            Boolean                   @default(false)

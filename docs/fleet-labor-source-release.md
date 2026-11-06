@@ -6,11 +6,20 @@ Gustavo como oficial; a liberação da nova fonte ainda depende de prova técnic
 de identidade, cardinalidade e paridade numérica com a consulta viva.
 
 Em 05/11/2026, `IND.BI.0038` já estava ocupada pelo diagnóstico agregado;
-Gustavo cadastrou `IND.BI.0039` em RM Labore/coligada global. A nova consulta
-está apenas cadastrada, **não aprovada para execução, estágio ou ativação**.
-O SQL preliminar pode converter componentes ausentes em zero mesmo com
-cardinalidade aparentemente válida; também falta escolher e conciliar o
-tratamento do rateio de `IND.BI.0025`. Não usar o rascunho como carga oficial.
+Gustavo cadastrou `IND.BI.0039` em RM Labore/coligada global. A consulta
+atualmente cadastrada é um rascunho **integral, sem o rateio oficial** e não
+está aprovada para execução, estágio ou ativação. Gustavo decidiu preservar
+exatamente o rateio da `IND.BI.0025` como regra oficial. O rascunho também
+pode converter componentes ausentes em zero mesmo com cardinalidade
+aparentemente válida. É preciso substituir e comparar a consulta dedicada,
+não fazer nova escolha de regra de rateio.
+
+O contrato aceito pelo backend é `CODCOLIGADA`, `CHAPA`, `FK_FUNCIONARIO`,
+`DT_MES`, `NROPERIODO`, `TOTAL_GERAL_RATEADO`, `CARDINALIDADE_OK` e
+`FORMULA_ID=IND.BI.0025_RATEADO_V1`. A antiga saída
+`TOTAL_GERAL_INTEGRAL`/`IND.BI.0025_INTEGRAL_V1` falha antes do estágio.
+Não impor artificialmente rateio de 100% se a fórmula original não impõe;
+a comparação deve usar os próprios valores e filtros da consulta oficial.
 
 ## Portas de segurança
 

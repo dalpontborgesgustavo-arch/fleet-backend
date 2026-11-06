@@ -226,12 +226,12 @@ export async function getLucasFleetGroupLaborActuals(
         unitId: USINA_ASPHALT_TEAM_CONTEXT.unitId,
         isCurrent: true, active: true, queryCode: FLEET_LABOR_QUERY_CODE,
         ruleVersion: FLEET_LABOR_FORMULA_ID, cardinalityOk: true },
-      _sum: { totalGeneralIntegral: true },
+      _sum: { totalGeneralRateado: true },
     }),
   ]) : [0, 0, null];
   const sourceIntegrityError = Boolean(approval && (approval.rowCount !== dedicatedCount ||
     approvalRowsCount !== dedicatedCount ||
-    !dedicatedSum?._sum.totalGeneralIntegral?.equals(approval.totalCost) ||
+    !dedicatedSum?._sum.totalGeneralRateado?.equals(approval.totalCost) ||
     approval.syncRun.queryCode !== FLEET_LABOR_QUERY_CODE ||
     approval.syncRun.status !== 'STAGED' ||
     approval.syncRun.ruleVersion !== FLEET_LABOR_FORMULA_ID ||
@@ -242,7 +242,7 @@ export async function getLucasFleetGroupLaborActuals(
         isCurrent: true, active: true, cardinalityOk: true,
         queryCode: FLEET_LABOR_QUERY_CODE,
         ruleVersion: FLEET_LABOR_FORMULA_ID },
-      select: { employeeKey: true, totalGeneralIntegral: true },
+      select: { employeeKey: true, totalGeneralRateado: true },
     }) : [];
   const provisional = !approval && keys.length
     ? await prisma.totvsEmployeeCostAggregate.findMany({
@@ -277,7 +277,7 @@ export async function getLucasFleetGroupLaborActuals(
   }[]>();
   const costRows = approval
     ? dedicated.map((row) => ({ employeeKey: row.employeeKey,
-      amount: row.totalGeneralIntegral, sourceOk: true, provisional: false }))
+      amount: row.totalGeneralRateado, sourceOk: true, provisional: false }))
     : provisional.map((row) => ({ employeeKey: row.employeeKey,
       amount: row.totalGeneralLine,
       sourceOk: row.syncRun.status === 'SUCCEEDED' && row.syncRun.rejectedRows === 0,

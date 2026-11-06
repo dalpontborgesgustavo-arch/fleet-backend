@@ -45,7 +45,7 @@ CREATE TABLE "TotvsFleetLaborCost" (
     "employeeKey" TEXT NOT NULL,
     "competence" DATE NOT NULL,
     "period" INTEGER NOT NULL,
-    "totalGeneralIntegral" DECIMAL(28,6) NOT NULL,
+    "totalGeneralRateado" DECIMAL(28,6) NOT NULL,
     "cardinalityOk" BOOLEAN NOT NULL,
     "contentHash" TEXT NOT NULL,
     "isCurrent" BOOLEAN NOT NULL DEFAULT false,
@@ -93,7 +93,7 @@ BEGIN
         NEW."employeeKey" IS DISTINCT FROM OLD."employeeKey" OR
         NEW."competence" IS DISTINCT FROM OLD."competence" OR
         NEW."period" IS DISTINCT FROM OLD."period" OR
-        NEW."totalGeneralIntegral" IS DISTINCT FROM OLD."totalGeneralIntegral" OR
+        NEW."totalGeneralRateado" IS DISTINCT FROM OLD."totalGeneralRateado" OR
         NEW."cardinalityOk" IS DISTINCT FROM OLD."cardinalityOk" OR
         NEW."contentHash" IS DISTINCT FROM OLD."contentHash" OR
         NEW."syncRunId" IS DISTINCT FROM OLD."syncRunId" OR

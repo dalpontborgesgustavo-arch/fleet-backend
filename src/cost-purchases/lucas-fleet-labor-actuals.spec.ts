@@ -25,7 +25,7 @@ function setup(subgroup = 'CARROS FROTA JR') {
     fleetResultMonthlyWorkforce: { findMany: jest.fn().mockResolvedValue([]) },
     totvsFleetLaborApproval: { findFirst: jest.fn().mockResolvedValue(null) },
     totvsFleetLaborCost: { count: jest.fn().mockResolvedValue(0),
-      aggregate: jest.fn().mockResolvedValue({ _sum: { totalGeneralIntegral: null } }),
+      aggregate: jest.fn().mockResolvedValue({ _sum: { totalGeneralRateado: null } }),
       findMany: jest.fn().mockResolvedValue([]) },
     totvsEmployeeCostAggregate: { findMany: jest.fn().mockResolvedValue([
       { employeeKey: '1-1', totalGeneralLine: '100', officialCostEligible: true,
@@ -228,14 +228,14 @@ describe('mao de obra da frota com ultimo vinculo mensal', () => {
     prisma.totvsFleetLaborApproval.findFirst.mockResolvedValueOnce({
       id: 'approval-1', rowCount: 1, sourceHash: 'hash', totalCost: '123.45',
       syncRun: { status: 'STAGED', sourceHash: 'hash', queryCode: 'IND.BI.0039',
-        ruleVersion: 'IND.BI.0025_INTEGRAL_V1' },
+        ruleVersion: 'IND.BI.0025_RATEADO_V1' },
     });
     prisma.totvsFleetLaborCost.count.mockResolvedValue(1);
     prisma.totvsFleetLaborCost.aggregate.mockResolvedValueOnce({
-      _sum: { totalGeneralIntegral: { equals: (value: unknown) => value === '123.45' } },
+      _sum: { totalGeneralRateado: { equals: (value: unknown) => value === '123.45' } },
     });
     prisma.totvsFleetLaborCost.findMany.mockResolvedValueOnce([
-      { employeeKey: '1-1', totalGeneralIntegral: '123.45' },
+      { employeeKey: '1-1', totalGeneralRateado: '123.45' },
     ]);
     const result = await getLucasFleetGroupLaborActuals(prisma as unknown as PrismaService, '2026-10');
     expect(result.groupLaborActuals[0]).toMatchObject({
@@ -251,7 +251,7 @@ describe('mao de obra da frota com ultimo vinculo mensal', () => {
     prisma.totvsFleetLaborApproval.findFirst.mockResolvedValueOnce({
       id: 'approval-1', rowCount: 2, sourceHash: 'hash', totalCost: '123.45',
       syncRun: { status: 'STAGED', sourceHash: 'hash', queryCode: 'IND.BI.0039',
-        ruleVersion: 'IND.BI.0025_INTEGRAL_V1' },
+        ruleVersion: 'IND.BI.0025_RATEADO_V1' },
     });
     prisma.totvsFleetLaborCost.count.mockResolvedValue(1);
     const result = await getLucasFleetGroupLaborActuals(prisma as unknown as PrismaService, '2026-10');

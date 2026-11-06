@@ -13,8 +13,14 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { USINA_ASPHALT_TEAM_CONTEXT } from '../usina-asphalt-teams/usina-asphalt-teams.rules';
 
-export const FLEET_LABOR_FORMULA_ID = 'IND.BI.0025_INTEGRAL_V1';
+// The JR-approved business rule preserves the PFRATEIOFIXO allocation of IND.BI.0025.
+// The earlier unallocated IND.BI.0039 draft must fail this version check.
+export const FLEET_LABOR_FORMULA_ID = 'IND.BI.0025_RATEADO_V1';
 export const FLEET_LABOR_QUERY_CODE = 'IND.BI.0039';
+const SOURCE_COLUMNS = new Set([
+  'CODCOLIGADA', 'CHAPA', 'FK_FUNCIONARIO', 'DT_MES', 'NROPERIODO',
+  'TOTAL_GERAL_RATEADO', 'CARDINALIDADE_OK', 'FORMULA_ID',
+]);
 const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const MAX_ROWS = 50_000;
 const TIMEOUT_MS = 20_000;
@@ -29,7 +35,7 @@ type NormalizedRow = {
   employeeKey: string;
   competence: Date;
   period: number;
-  totalGeneralIntegral: Prisma.Decimal;
+  totalGeneralRateado: Prisma.Decimal;
   cardinalityOk: true;
   contentHash: string;
 };
@@ -71,10 +77,10 @@ function decimal(value: string) {
     ? value.replace(/\./g, '').replace(',', '.')
     : value;
   if (!/^-?\d+(?:\.\d{1,6})?$/.test(numeric)) {
-    throw new BadRequestException('TOTAL_GERAL_INTEGRAL invalido');
+    throw new BadRequestException('TOTAL_GERAL_RATEADO invalido');
   }
   const parsed = new Prisma.Decimal(numeric);
-  if (!parsed.isFinite()) throw new BadRequestException('TOTAL_GERAL_INTEGRAL invalido');
+  if (!parsed.isFinite()) throw new BadRequestException('TOTAL_GERAL_RATEADO invalido');
   return parsed;
 }
 
@@ -94,6 +100,11 @@ export function normalizeFleetLaborRows(rows: unknown): {
       throw new BadRequestException(`Linha ${index + 1} da consulta nao e um objeto`);
     }
     const row = value as SourceRow;
+    const keys = Object.keys(row);
+    if (keys.length !== SOURCE_COLUMNS.size ||
+        keys.some((key) => !SOURCE_COLUMNS.has(key))) {
+      throw new BadRequestException(`Colunas da consulta divergentes na linha ${index + 1}`);
+    }
     const companyCode = field(row, 'CODCOLIGADA');
     const employeeNumber = field(row, 'CHAPA');
     const employeeKey = field(row, 'FK_FUNCIONARIO');
@@ -124,13 +135,13 @@ export function normalizeFleetLaborRows(rows: unknown): {
       throw new BadRequestException(`Funcionario e periodo duplicados na linha ${index + 1}`);
     }
     seen.add(key);
-    const totalGeneralIntegral = decimal(field(row, 'TOTAL_GERAL_INTEGRAL'));
+    const totalGeneralRateado = decimal(field(row, 'TOTAL_GERAL_RATEADO'));
     const canonical = { companyCode, employeeNumber, employeeKey,
       competence: rowCompetence.toISOString().slice(0, 10), period,
-      totalGeneralIntegral: totalGeneralIntegral.toFixed(6),
+      totalGeneralRateado: totalGeneralRateado.toFixed(6),
       formulaId, cardinalityOk: true };
     return { companyCode, employeeNumber, employeeKey,
-      competence: rowCompetence, period, totalGeneralIntegral,
+      competence: rowCompetence, period, totalGeneralRateado,
       cardinalityOk: true as const, contentHash: hash(canonical) };
   });
   normalized.sort((a, b) => a.competence.getTime() - b.competence.getTime() ||
@@ -139,7 +150,7 @@ export function normalizeFleetLaborRows(rows: unknown): {
   const competences = [...months].sort().map((competence) => {
     const selected = normalized.filter((row) => row.competence.toISOString().startsWith(competence));
     return { competence, rowCount: selected.length,
-      totalCost: selected.reduce((sum, row) => sum.plus(row.totalGeneralIntegral),
+      totalCost: selected.reduce((sum, row) => sum.plus(row.totalGeneralRateado),
         new Prisma.Decimal(0)).toFixed(6) };
   });
   return { rows: normalized, sourceHash, competences };
@@ -303,7 +314,7 @@ export class TotvsFleetLaborSourceService {
               employeeKey: row.employeeKey,
               competence: row.competence,
               period: row.period,
-              totalGeneralIntegral: row.totalGeneralIntegral,
+              totalGeneralRateado: row.totalGeneralRateado,
               cardinalityOk: row.cardinalityOk,
               contentHash: row.contentHash,
               syncRunId: run.id,
@@ -338,14 +349,14 @@ export class TotvsFleetLaborSourceService {
     const rows = await this.prisma.totvsFleetLaborCost.findMany({
       where: { syncRunId: runId },
       select: { competence: true, employeeKey: true, period: true,
-        totalGeneralIntegral: true, cardinalityOk: true },
+        totalGeneralRateado: true, cardinalityOk: true },
     });
     const months = [...new Set(rows.map((row) => row.competence.toISOString().slice(0, 7)))];
     const competences = months.map((competence) => {
       const monthRows = rows.filter((row) => row.competence.toISOString().startsWith(competence));
       return { competence, rowCount: monthRows.length,
         distinctEmployees: new Set(monthRows.map((row) => row.employeeKey)).size,
-        totalCost: monthRows.reduce((sum, row) => sum.plus(row.totalGeneralIntegral),
+        totalCost: monthRows.reduce((sum, row) => sum.plus(row.totalGeneralRateado),
           new Prisma.Decimal(0)).toFixed(6),
         periods: [...new Set(monthRows.map((row) => row.period))].sort() };
     });
@@ -378,9 +389,9 @@ export class TotvsFleetLaborSourceService {
       this.prisma.totvsFleetLaborCost.count({ where: { approvalId: approval.id } }),
       this.prisma.totvsFleetLaborCost.count({ where }),
       this.prisma.totvsFleetLaborCost.aggregate({ where,
-        _sum: { totalGeneralIntegral: true } }),
+        _sum: { totalGeneralRateado: true } }),
     ]);
-    const currentTotal = sum._sum.totalGeneralIntegral || new Prisma.Decimal(0);
+    const currentTotal = sum._sum.totalGeneralRateado || new Prisma.Decimal(0);
     const officialReady = approval.syncRun.status === 'STAGED' &&
       approval.syncRun.queryCode === FLEET_LABOR_QUERY_CODE &&
       approval.syncRun.ruleVersion === FLEET_LABOR_FORMULA_ID &&
@@ -422,12 +433,12 @@ export class TotvsFleetLaborSourceService {
       }
       const rows = await tx.totvsFleetLaborCost.findMany({ where: { syncRunId: runId, competence },
         select: { id: true, competence: true, employeeKey: true, period: true,
-          totalGeneralIntegral: true, cardinalityOk: true, ruleVersion: true } });
+          totalGeneralRateado: true, cardinalityOk: true, ruleVersion: true } });
       if (!rows.length || rows.some((row) => row.competence.getTime() !== competence.getTime() ||
           !row.cardinalityOk || row.ruleVersion !== FLEET_LABOR_FORMULA_ID)) {
         throw new ConflictException('Competencia ausente ou sem formula/cardinalidade reconciliada');
       }
-      const actualTotal = rows.reduce((sum, row) => sum.plus(row.totalGeneralIntegral),
+      const actualTotal = rows.reduce((sum, row) => sum.plus(row.totalGeneralRateado),
         new Prisma.Decimal(0));
       if (run.sourceHash !== expected.sourceHash || rows.length !== expected.rowCount ||
           !actualTotal.equals(total)) {
