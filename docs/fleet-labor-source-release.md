@@ -1,18 +1,15 @@
 # Fonte dedicada de mão de obra — Resultados Frota
 
 Esta implementação é isolada da consulta compartilhada `IND.BI.0025` e das
-tabelas atuais de funcionários da TOTVS. A fórmula de custo foi definida pelo
-Gustavo como oficial; a liberação da nova fonte ainda depende de prova técnica
-de identidade, cardinalidade e paridade numérica com a consulta viva.
+tabelas atuais de funcionários da TOTVS. Gustavo definiu a fórmula rateada da
+`0025` como oficial. A consulta dedicada já passou na prova direta de
+identidade, cardinalidade e paridade numérica, mas ainda **não está ativa no JR**.
 
 Em 05/11/2026, `IND.BI.0038` já estava ocupada pelo diagnóstico agregado;
-Gustavo cadastrou `IND.BI.0039` em RM Labore/coligada global. A consulta
-atualmente cadastrada é um rascunho **integral, sem o rateio oficial** e não
-está aprovada para execução, estágio ou ativação. Gustavo decidiu preservar
-exatamente o rateio da `IND.BI.0025` como regra oficial. O rascunho também
-pode converter componentes ausentes em zero mesmo com cardinalidade
-aparentemente válida. É preciso substituir e comparar a consulta dedicada,
-não fazer nova escolha de regra de rateio.
+Gustavo cadastrou `IND.BI.0039` em RM Labore/coligada global. O rascunho
+integral, sem rateio, foi substituído em 06/11/2026 pela candidata que
+preserva a fórmula da `0025`. A `0039` ficou instalada no TOTVS após
+comparação direta; não houve estágio, aprovação ou sincronização dela no JR.
 
 O contrato aceito pelo backend é `CODCOLIGADA`, `CHAPA`, `FK_FUNCIONARIO`,
 `DT_MES`, `NROPERIODO`, `TOTAL_GERAL_RATEADO`, `CARDINALIDADE_OK` e
@@ -23,7 +20,7 @@ a comparação deve usar os próprios valores e filtros da consulta oficial.
 
 ## Portas de segurança
 
-1. Corrigir e testar a consulta dedicada `IND.BI.0039` no TOTVS sem alterar a
+1. Manter a consulta dedicada `IND.BI.0039` homologada no TOTVS sem alterar a
    `IND.BI.0025`. A consulta deve entregar exatamente as oito colunas aceitas
    pelo normalizador, somente as duas últimas competências de calendário já
    encerradas. Não enviar mês corrente. Histórico antigo é tratado em lotes
@@ -92,9 +89,11 @@ usuários de apresentação mantêm somente a leitura dos vínculos mensais já
 gravados. A lista nominal de funcionários selecionáveis usa a mesma autorização
 da escrita e responde `403` para os demais gestores.
 
-## Evidência local em 05/11/2026
+## Evidência em 06/11/2026
 
-- Prisma validou o schema; build e testes do backend passaram localmente.
+- Prisma validou o schema; build e 424 testes do backend passaram localmente.
+  A CI da PR #53 também passou no commit `e90af9f`; ainda não houve merge
+  nem publicação da API.
 - A versão anterior das duas migrations foi executada em PostgreSQL 18.6 isolado (PGlite/WASM),
   com uma tabela `Vehicle` mínima apenas para satisfazer a FK. Seis checagens
   passaram: inserção e leitura, bloqueio de alteração/exclusão de fato aprovado,
@@ -102,11 +101,20 @@ da escrita e responde `403` para os demais gestores.
   imutável. O total de teste permaneceu `100.000000`.
 - As novas colunas de recibo, trigger de fatos estagiados e tabela de reversão
   têm ensaio PostgreSQL adicionado à CI, incluindo mutações/deleções bloqueadas
-  e as transições permitidas de aprovação e aposentadoria; ainda precisa passar
-  na CI Linux antes de qualquer release.
+  e as transições permitidas de aprovação e aposentadoria; a CI Linux passou.
   O ensaio anterior **não** equivale a ensaiar sobre uma cópia completa do banco JR, nem
-  comprova a execução da consulta `IND.BI.0039` no TOTVS. Nenhuma migration foi
-  aplicada na produção.
+  comprova a carga na API de produção. Nenhuma migration foi aplicada na produção.
+- A consulta `IND.BI.0039` instalada no TOTVS foi comparada diretamente com a
+  `0025` viva: setembro 481/481 chaves, outubro 495/495, valores idênticos,
+  zero linhas inválidas e nenhuma diferença. Readback SOAP independente
+  confirmou a `0039` instalada e a `0025` intacta.
+- O PostgreSQL ainda tem uma chave antiga a mais em setembro (482 contra 481
+  da fonte viva), valor zero e não elegível como custo oficial. A reconciliação
+  pontual exige snapshot, alteração condicionada e readback antes do primeiro
+  manifesto novo da `0025`. Não excluir a linha histórica nem afrouxar a
+  proteção geral contra respostas parciais. A PR agora falha antes de gravar
+  agregados se a `0025` devolver alguma linha inválida, e preserva a versão
+  histórica se uma chave aposentada reaparecer.
 - A identidade de Lucas da Apresentação foi conferida no banco da JR em modo
   somente leitura. A variável `LUCAS_FLEET_LABOR_VIEWER_USER_IDS` ainda não
   foi configurada neste worktree; até o corte, apenas CEO/admin recebem
