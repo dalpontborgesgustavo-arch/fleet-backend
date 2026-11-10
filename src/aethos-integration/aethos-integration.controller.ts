@@ -300,6 +300,16 @@ export class AethosIntegrationController {
     return this.service.syncPlanAccountCosts(body);
   }
 
+  @Post('planos-conta/sync')
+  syncPlanAccounts(
+    @Headers('x-aethos-sync-token') token: string | string[] | undefined,
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: unknown,
+  ) {
+    this.service.assertToken(token, authorization);
+    return this.service.syncPlanAccounts(body);
+  }
+
   @Post('custos-plano-conta/elegibilidade-fiscal/readback')
   readFiscalBudgetEligibility(
     @Headers('x-aethos-sync-token') token: string | string[] | undefined,

@@ -76,6 +76,13 @@ type SyncPlanAccountCost = {
   active: boolean;
 };
 
+type SyncPlanAccount = {
+  idSubnivel: string;
+  nome: string;
+  ativo: boolean;
+  dataInativacao: Date | null;
+};
+
 type SyncContractAttachment = {
   aethosId: string;
   documentAethosId: string;
@@ -304,6 +311,88 @@ function listFromBody(body: unknown, keys: string[]) {
   }
 
   return [];
+}
+
+function saoPauloCalendarDate(now: Date) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const value = (type: string) =>
+    parts.find((part) => part.type === type)?.value;
+  return new Date(
+    `${value('year')}-${value('month')}-${value('day')}T00:00:00.000Z`,
+  );
+}
+
+function normalizePlanAccountSnapshot(body: unknown): SyncPlanAccount[] {
+  const rows = listFromBody(body, ['planosConta']);
+  if (!rows.length || rows.length > 5000) {
+    throw new BadRequestException(
+      'Snapshot de planos de conta vazio ou excessivo',
+    );
+  }
+  const declaredCount =
+    body && typeof body === 'object' && !Array.isArray(body)
+      ? (body as AnyRow).totalPlanos
+      : null;
+  if (!Number.isSafeInteger(declaredCount) || declaredCount !== rows.length) {
+    throw new BadRequestException(
+      'Total de planos informado diverge do snapshot',
+    );
+  }
+
+  const seen = new Set<string>();
+  return rows.map((row, index) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) {
+      throw new BadRequestException(
+        `Plano de conta invalido na linha ${index + 1}`,
+      );
+    }
+    const idSubnivel = normalizeText(row.id);
+    const nome = normalizeText(row.nome);
+    const ativo = row.ativo;
+    if (
+      !/^[1-9]\d*$/.test(idSubnivel) ||
+      !Number.isSafeInteger(Number(idSubnivel)) ||
+      !nome ||
+      nome.length > 500 ||
+      typeof ativo !== 'boolean' ||
+      seen.has(idSubnivel)
+    ) {
+      throw new BadRequestException(
+        `Plano de conta invalido na linha ${index + 1}`,
+      );
+    }
+    seen.add(idSubnivel);
+
+    const rawDate = row.dataInativacao;
+    let dataInativacao: Date | null = null;
+    if (rawDate !== undefined && rawDate !== null && rawDate !== '') {
+      if (
+        ativo ||
+        typeof rawDate !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(rawDate)
+      ) {
+        throw new BadRequestException(
+          `Data de inativacao invalida na linha ${index + 1}`,
+        );
+      }
+      dataInativacao = new Date(`${rawDate}T00:00:00.000Z`);
+      if (
+        Number.isNaN(dataInativacao.getTime()) ||
+        dataInativacao.toISOString().slice(0, 10) !== rawDate
+      ) {
+        throw new BadRequestException(
+          `Data de inativacao invalida na linha ${index + 1}`,
+        );
+      }
+    }
+
+    return { idSubnivel, nome, ativo, dataInativacao };
+  });
 }
 
 function normalizeItems(body: unknown) {
@@ -1920,6 +2009,112 @@ export class AethosIntegrationService {
       received: rawRows.length,
       upserted: custos.length,
       skipped: Math.max(0, rawRows.length - custos.length),
+    };
+  }
+
+  async syncPlanAccounts(body: unknown) {
+    const plans = normalizePlanAccountSnapshot(body);
+    const now = new Date();
+    const observedDate = saoPauloCalendarDate(now);
+    if (
+      plans.some(
+        (plan) => plan.dataInativacao && plan.dataInativacao > observedDate,
+      )
+    ) {
+      throw new BadRequestException('Data de inativacao futura no snapshot');
+    }
+
+    const [existingTotal, existing] = await Promise.all([
+      this.prisma.aethosPlanoConta.count(),
+      this.prisma.aethosPlanoConta.findMany({
+        where: { idSubnivel: { in: plans.map((plan) => plan.idSubnivel) } },
+        select: { idSubnivel: true, nome: true, ativo: true },
+      }),
+    ]);
+    if (existingTotal >= 100 && plans.length < existingTotal * 0.9) {
+      throw new BadRequestException(
+        'Snapshot parcial: queda superior a 10% do catalogo',
+      );
+    }
+    const byId = new Map(existing.map((plan) => [plan.idSubnivel, plan]));
+    const newPlans = plans.filter((plan) => !byId.has(plan.idSubnivel));
+    const updates = plans.filter((plan) => {
+      const previous = byId.get(plan.idSubnivel);
+      return (
+        previous &&
+        (previous.ativo !== plan.ativo || previous.nome !== plan.nome)
+      );
+    });
+    const flips = updates.filter(
+      (plan) => byId.get(plan.idSubnivel)?.ativo !== plan.ativo,
+    );
+
+    await this.prisma.$transaction(
+      async (tx) => {
+        if (newPlans.length) {
+          await tx.aethosPlanoConta.createMany({
+            data: newPlans.map((plan) => ({
+              idSubnivel: plan.idSubnivel,
+              nome: plan.nome,
+              ativo: plan.ativo,
+              firstObservedAt: now,
+            })),
+          });
+        }
+        for (const plan of updates) {
+          await tx.aethosPlanoConta.update({
+            where: { idSubnivel: plan.idSubnivel },
+            data: { nome: plan.nome, ativo: plan.ativo },
+          });
+        }
+
+        const previousEvents = flips.length
+          ? await tx.aethosPlanoContaStatusEvent.findMany({
+              where: {
+                idSubnivel: { in: flips.map((plan) => plan.idSubnivel) },
+              },
+              orderBy: [
+                { effectiveAt: 'desc' },
+                { observedAt: 'desc' },
+                { id: 'desc' },
+              ],
+              select: { idSubnivel: true, effectiveAt: true },
+            })
+          : [];
+        const lastEventById = new Map<string, Date>();
+        previousEvents.forEach((event) => {
+          if (!lastEventById.has(event.idSubnivel)) {
+            lastEventById.set(event.idSubnivel, event.effectiveAt);
+          }
+        });
+        const eventPlans = [...newPlans, ...flips];
+        if (eventPlans.length) {
+          await tx.aethosPlanoContaStatusEvent.createMany({
+            data: eventPlans.map((plan) => {
+              const lastEffectiveAt = lastEventById.get(plan.idSubnivel);
+              const useHistory =
+                !plan.ativo &&
+                plan.dataInativacao !== null &&
+                (!lastEffectiveAt || plan.dataInativacao >= lastEffectiveAt);
+              return {
+                idSubnivel: plan.idSubnivel,
+                ativo: plan.ativo,
+                effectiveAt: useHistory ? plan.dataInativacao! : observedDate,
+                observedAt: now,
+                source: useHistory ? 'AETHOS_HISTORY' : 'SYNC_OBSERVED',
+              };
+            }),
+          });
+        }
+      },
+      { timeout: 120_000 },
+    );
+
+    return {
+      ok: true,
+      received: plans.length,
+      upserted: newPlans.length + updates.length,
+      changed: flips.length,
     };
   }
 
