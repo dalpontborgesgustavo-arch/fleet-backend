@@ -338,7 +338,9 @@ function coerceText(value: unknown) {
 function coerceFiniteNumber(value: unknown) {
   if (typeof value !== 'number' && typeof value !== 'string') return null;
   if (typeof value === 'string' && !value.trim()) return null;
-  const parsed = Number(typeof value === 'string' ? value.replace(',', '.') : value);
+  const parsed = Number(
+    typeof value === 'string' ? value.replace(',', '.') : value,
+  );
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -1025,6 +1027,12 @@ export class BudgetAnalysisService {
       ),
       depreciationFilter,
     );
+    const allPlanAccountCostsInMonth: Prisma.AethosPlanoContaCostWhereInput = {
+      AND: [
+        planAccountWhereByDateBasis(year, month, competencia, dateBasis, 'all'),
+        { valorCusto: { not: 0 } },
+      ],
+    };
     const legacyWhere = applyLegacyDepreciationFilter(
       { competencia, active: true },
       depreciationFilter,
@@ -1064,6 +1072,9 @@ export class BudgetAnalysisService {
       totalPlanAccountRows,
       totalLegacyRows,
       responsibles,
+      planStatusEvents,
+      planCostPresence,
+      legacyCostPresence,
     ] = await Promise.all([
       this.prisma.budgetLine.findMany({
         where: lineWhere,
@@ -1116,6 +1127,21 @@ export class BudgetAnalysisService {
         orderBy: { responsible: 'asc' },
         select: { responsible: true },
       }),
+      this.prisma.aethosPlanoContaStatusEvent.findMany({
+        where: { effectiveAt: { lt: monthUtcRange(year, month).end } },
+        orderBy: [{ effectiveAt: 'asc' }, { observedAt: 'asc' }, { id: 'asc' }],
+        select: { idSubnivel: true, ativo: true },
+      }),
+      this.prisma.aethosPlanoContaCost.groupBy({
+        by: ['codigoPlanoConta'],
+        where: allPlanAccountCostsInMonth,
+        _count: { _all: true },
+      }),
+      this.prisma.aethosSubgroupActual.groupBy({
+        by: ['idSubgrupo'],
+        where: { competencia, active: true, valorRealizado: { not: 0 } },
+        _count: { _all: true },
+      }),
     ]);
     const usePlanAccountCosts =
       totalPlanAccountRows > 0 ||
@@ -1154,6 +1180,19 @@ export class BudgetAnalysisService {
         description: current?.description || entry.description,
       });
     });
+
+    const planStatusByCode = new Map<string, boolean>();
+    planStatusEvents.forEach((event) => {
+      planStatusByCode.set(event.idSubnivel, event.ativo);
+    });
+    const codesWithCostInMonth = new Set(
+      planCostPresence.map((row) => row.codigoPlanoConta),
+    );
+    if (!usePlanAccountCosts) {
+      legacyCostPresence.forEach((row) =>
+        codesWithCostInMonth.add(row.idSubgrupo),
+      );
+    }
 
     const analysisLines = lines.filter(
       (line) =>
@@ -1235,6 +1274,13 @@ export class BudgetAnalysisService {
       responsibleFilters.map((item) => normalizeComparable(item)),
     );
     const rows = [...budgetRows, ...aethosOnlyRows].filter((row) => {
+      if (
+        planStatusByCode.get(row.idSubgrupo) === false &&
+        !codesWithCostInMonth.has(row.idSubgrupo)
+      ) {
+        return false;
+      }
+
       if (companies.length > 0 && !companies.includes(row.company)) {
         return false;
       }

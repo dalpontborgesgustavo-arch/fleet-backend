@@ -437,6 +437,32 @@ model AethosPlanoContaCost {
   @@index([dataEmissaoNotaFiscal])
 }
 
+model AethosPlanoConta {
+  idSubnivel      String   @id
+  nome            String
+  ativo           Boolean
+  firstObservedAt DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  statusEvents AethosPlanoContaStatusEvent[]
+
+  @@index([ativo])
+}
+
+model AethosPlanoContaStatusEvent {
+  id           Int      @id @default(autoincrement())
+  idSubnivel   String
+  ativo        Boolean
+  effectiveAt  DateTime @db.Date
+  observedAt   DateTime @default(now())
+  source       String
+
+  planoConta AethosPlanoConta @relation(fields: [idSubnivel], references: [idSubnivel], onDelete: Restrict)
+
+  @@index([idSubnivel, effectiveAt, observedAt])
+  @@index([effectiveAt])
+}
+
 model AethosPlanoContaCostReconciliation {
   id                   String   @id @default(uuid())
   reconciliationId     String   @unique

@@ -50,6 +50,9 @@ describe('BudgetAnalysisService invoice issue basis', () => {
         findFirst: jest.fn().mockResolvedValue(null),
         count: jest.fn().mockResolvedValue(0),
       },
+      aethosPlanoContaStatusEvent: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     };
     const service = new BudgetAnalysisService(prisma as never);
 
@@ -136,6 +139,9 @@ describe('BudgetAnalysisService invoice issue basis', () => {
         findFirst: jest.fn().mockResolvedValue(null),
         count: jest.fn().mockResolvedValue(0),
       },
+      aethosPlanoContaStatusEvent: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     };
     const service = new BudgetAnalysisService(prisma as never);
 
@@ -165,6 +171,153 @@ describe('BudgetAnalysisService invoice issue basis', () => {
     );
     expect(result.summary.realized).toBe(300);
     expect(result.filters.companies).toEqual(['PRUMARE', 'PEDRAFORTE']);
+  });
+
+  it('hides an inactive plan only from its inactive month, keeping months with costs and reactivation', async () => {
+    const line = {
+      id: 'line-7',
+      idSubgrupo: '7',
+      descricao: 'Plano com historico',
+      responsible: 'Compras',
+      annualCost: 12000,
+      monthlyCost: 1000,
+      monthlyBudgets: [],
+    };
+    const events = [
+      {
+        idSubnivel: '7',
+        ativo: false,
+        effectiveAt: new Date('2026-11-10T00:00:00.000Z'),
+      },
+      {
+        idSubnivel: '7',
+        ativo: true,
+        effectiveAt: new Date('2026-12-01T00:00:00.000Z'),
+      },
+    ];
+    const prisma = {
+      budgetVersion: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'version-2026',
+          year: 2026,
+          name: 'Orcamento 2026',
+          baseRevenue: 21000000,
+          importedAt: new Date('2026-01-01T00:00:00.000Z'),
+        }),
+      },
+      budgetLine: {
+        findMany: jest.fn(({ include }) =>
+          Promise.resolve(include ? [line] : []),
+        ),
+      },
+      aethosPlanoContaCost: {
+        groupBy: jest.fn(({ by, where }) => {
+          const hasCost =
+            (where.competencia ?? where.AND?.[0]?.competencia) === '2026-11';
+          if (!hasCost) return Promise.resolve([]);
+          return Promise.resolve(
+            by.length === 1
+              ? [{ codigoPlanoConta: '7', _count: { _all: 1 } }]
+              : [
+                  {
+                    codigoPlanoConta: '7',
+                    nomePlanoConta: 'Plano com historico',
+                    _sum: { valorCusto: 50 },
+                  },
+                ],
+          );
+        }),
+        findFirst: jest.fn().mockResolvedValue(null),
+        count: jest.fn(({ where }) =>
+          Promise.resolve(where.competencia === '2026-11' ? 1 : 0),
+        ),
+      },
+      aethosSubgroupActual: {
+        groupBy: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn().mockResolvedValue(null),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      aethosPlanoContaStatusEvent: {
+        findMany: jest.fn(({ where }) =>
+          Promise.resolve(
+            events.filter((event) => event.effectiveAt < where.effectiveAt.lt),
+          ),
+        ),
+      },
+    };
+    const service = new BudgetAnalysisService(prisma as never);
+
+    const october = await service.getOverview(
+      { year: 2026, month: 10 },
+      'admin',
+    );
+    expect(october.rows.map((row) => row.idSubgrupo)).toContain('7');
+
+    const november = await service.getOverview(
+      { year: 2026, month: 11 },
+      'admin',
+    );
+    expect(november.rows).toEqual([
+      expect.objectContaining({ idSubgrupo: '7', realized: 50 }),
+    ]);
+
+    const december = await service.getOverview(
+      { year: 2026, month: 12 },
+      'admin',
+    );
+    expect(december.rows.map((row) => row.idSubgrupo)).toContain('7');
+  });
+
+  it('removes an inactive no-cost plan from summary without changing the stored budget', async () => {
+    const line = {
+      id: 'line-7',
+      idSubgrupo: '7',
+      descricao: 'Plano inativo',
+      responsible: 'Compras',
+      annualCost: 12000,
+      monthlyCost: 1000,
+      monthlyBudgets: [],
+    };
+    const prisma = {
+      budgetVersion: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'version-2026',
+          year: 2026,
+          name: 'Orcamento 2026',
+          baseRevenue: 21000000,
+          importedAt: new Date('2026-01-01T00:00:00.000Z'),
+        }),
+      },
+      budgetLine: {
+        findMany: jest.fn(({ include }) =>
+          Promise.resolve(include ? [line] : []),
+        ),
+      },
+      aethosPlanoContaCost: {
+        groupBy: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn().mockResolvedValue(null),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      aethosSubgroupActual: {
+        groupBy: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn().mockResolvedValue(null),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      aethosPlanoContaStatusEvent: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ idSubnivel: '7', ativo: false }]),
+      },
+    };
+    const service = new BudgetAnalysisService(prisma as never);
+    const november = await service.getOverview(
+      { year: 2026, month: 11 },
+      'admin',
+    );
+    expect(november.rows).toEqual([]);
+    expect(november.summary.lines).toBe(0);
+    expect(november.summary.monthlyBudget).toBe(0);
+    expect(line.monthlyCost).toBe(1000);
   });
 
   it('creates a zero-value budget line when assigning an existing responsible to an Aethos-only plan', async () => {
