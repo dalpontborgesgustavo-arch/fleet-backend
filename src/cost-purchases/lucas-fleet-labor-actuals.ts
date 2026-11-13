@@ -54,16 +54,42 @@ function normalized(value: unknown) {
     .toUpperCase();
 }
 
-export function lucasFleetGroupKey(vehicle: {
+type LucasFleetGroupingVehicle = {
+  fleet?: string | null;
   name?: string | null;
   subgroup?: string | null;
   rollerType?: string | null;
-}) {
+};
+
+function isCapinadeira127(vehicle: LucasFleetGroupingVehicle) {
+  return (
+    String(vehicle.fleet ?? '').trim() === '127' &&
+    normalized(vehicle.name) === 'CAPINADEIRA HIDRAULICA'
+  );
+}
+
+export function isLucasMiniImplement(
+  vehicle: LucasFleetGroupingVehicle,
+  competence: string,
+) {
+  if (competence < '2026-01') return false;
+  return (
+    normalized(vehicle.name) === 'FREZINHA' ||
+    normalized(vehicle.subgroup) === 'VASSOURAS' ||
+    isCapinadeira127(vehicle)
+  );
+}
+
+export function lucasFleetGroupKey(
+  vehicle: LucasFleetGroupingVehicle,
+  competence: string,
+) {
   const subgroup = normalized(vehicle.subgroup);
   if (
     normalized(vehicle.name) === 'FREZINHA' ||
     subgroup === 'MINI CARREGADEIRAS' ||
-    subgroup === 'VASSOURAS'
+    subgroup === 'VASSOURAS' ||
+    (competence >= '2026-01' && isCapinadeira127(vehicle))
   ) {
     return 'SUBGROUP:VASSOURAS';
   }
@@ -85,7 +111,11 @@ export async function getLucasFleetGroupLaborActuals(
   const month = new Date(`${competence}-01T00:00:00.000Z`);
   const roster = await getLucasFleetRosterMonth(prisma, competence);
   const activeRows = roster.rows.filter((row) => row.active);
-  const ids = activeRows.map((row) => row.id);
+  // Implements belong to the mini's financial group, but have no separate
+  // operator or monthly crew. Querying their checklists would invent labor gaps.
+  const ids = activeRows
+    .filter((row) => !isLucasMiniImplement(row, competence))
+    .map((row) => row.id);
   const [vehicles, checklists, workforceSettings] = await Promise.all([
     prisma.vehicle.findMany({
       where: { id: { in: ids } },
@@ -170,7 +200,7 @@ export async function getLucasFleetGroupLaborActuals(
   const validationReferences: ValidationReference[] = [];
   const groups = new Map<string, LaborGroup>();
   for (const vehicle of activeRows) {
-    const groupKey = lucasFleetGroupKey(vehicle);
+    const groupKey = lucasFleetGroupKey(vehicle, competence);
     if (!groupKey) continue;
     const group = groups.get(groupKey) || {
       vehicleIds: [],
@@ -181,6 +211,10 @@ export async function getLucasFleetGroupLaborActuals(
       inheritedMonths: new Set<string>(),
     };
     group.vehicleIds.push(vehicle.id);
+    if (isLucasMiniImplement(vehicle, competence)) {
+      groups.set(groupKey, group);
+      continue;
+    }
     const checklistOwner =
       vehicleById.get(vehicle.id)?.monthlyChecklistResponsible?.name || null;
     const addGap = (
