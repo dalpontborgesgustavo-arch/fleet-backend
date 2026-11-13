@@ -217,7 +217,15 @@ describe('TaxForecastsService', () => {
     ]);
   });
 
-  it('keeps the manual fallback but prioritizes a nonzero Aethos actual', async () => {
+  it('uses the JR manual actual even when Aethos has a different amount', async () => {
+    const groupBy = jest.fn().mockResolvedValue([
+      {
+        codigoEmpresa: '1',
+        codigoPlanoConta: '145',
+        competencia: '2026-09',
+        _sum: { valorCusto: 930.25 },
+      },
+    ]);
     const service = new TaxForecastsService({
       taxForecast: {
         findMany: jest.fn().mockResolvedValue([
@@ -237,14 +245,7 @@ describe('TaxForecastsService', () => {
         ]),
       },
       aethosPlanoContaCost: {
-        groupBy: jest.fn().mockResolvedValue([
-          {
-            codigoEmpresa: '1',
-            codigoPlanoConta: '145',
-            competencia: '2026-09',
-            _sum: { valorCusto: 930.25 },
-          },
-        ]),
+        groupBy,
         findFirst: jest.fn().mockResolvedValue({
           syncedAt: new Date('2026-09-03T12:00:00.000Z'),
         }),
@@ -258,142 +259,168 @@ describe('TaxForecastsService', () => {
 
     expect(result.entries).toEqual([
       expect.objectContaining({
-        actualAmount: 930.25,
-        actualAmountAethos: 930.25,
+        actualAmount: 725.5,
+        actualAmountAethos: 0,
         actualAmountManual: 725.5,
-        actualSource: 'AETHOS_PLANO_CONTA',
-        actualOverrodeManual: true,
+        actualSource: 'MANUAL',
+        actualOverrodeManual: false,
       }),
     ]);
+    expect(groupBy).not.toHaveBeenCalled();
+    expect(result.summary.actualAmount).toBe(725.5);
   });
 
-  it('fills actual tax values from the mapped Aethos plan accounts', async () => {
+  it('does not add Aethos-only rows to the manual tax forecast', async () => {
+    const groupBy = jest
+      .fn()
+      .mockResolvedValue([
+        {
+          codigoEmpresa: '1',
+          codigoPlanoConta: '153',
+          competencia: '2026-07',
+          _sum: { valorCusto: 89547.43 },
+        },
+      ]);
     const service = new TaxForecastsService({
       taxForecast: { findMany: jest.fn().mockResolvedValue([]) },
-      aethosPlanoContaCost: {
-        groupBy: jest.fn().mockResolvedValue([
-          {
-            codigoEmpresa: '1',
-            codigoPlanoConta: '153',
-            competencia: '2026-07',
-            _sum: { valorCusto: 89547.43 },
-          },
-          {
-            codigoEmpresa: '1',
-            codigoPlanoConta: '1132',
-            competencia: '2026-07',
-            _sum: { valorCusto: 107.5 },
-          },
-          {
-            codigoEmpresa: '4',
-            codigoPlanoConta: '1074',
-            competencia: '2026-07',
-            _sum: { valorCusto: 6297.88 },
-          },
-          {
-            codigoEmpresa: '1',
-            codigoPlanoConta: '145',
-            competencia: '2026-07',
-            _sum: { valorCusto: 35000 },
-          },
-        ]),
-        findFirst: jest.fn().mockResolvedValue({
-          syncedAt: new Date('2026-07-28T18:00:00.000Z'),
-        }),
-      },
+      aethosPlanoContaCost: { groupBy },
     } as any);
 
     const result = await service.findAll({ year: '2026' }, 'contabilidade');
 
-    expect(result.entries).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          company: 'JR_CONSTRUCOES',
-          taxType: 'PIS',
-          month: 6,
-          actualAmount: 89547.43,
-          actualPlanCodes: ['153'],
-          actualAethosCompetences: ['2026-07'],
-          fiscalCompetenceOffsetMonths: 1,
-        }),
-        expect.objectContaining({
-          company: 'JR_GESTAO',
-          taxType: 'PIS',
-          month: 6,
-          actualAmount: 107.5,
-          actualPlanCodes: ['1132'],
-          actualAethosCompetences: ['2026-07'],
-          fiscalCompetenceOffsetMonths: 1,
-        }),
-        expect.objectContaining({
-          company: 'PEDRAFORTE',
-          taxType: 'PIS',
-          month: 6,
-          actualAmount: 6297.88,
-          actualPlanCodes: ['1074'],
-          actualAethosCompetences: ['2026-07'],
-          fiscalCompetenceOffsetMonths: 1,
-        }),
-        expect.objectContaining({
-          company: 'JR_CONSTRUCOES',
-          taxType: 'IRPJ',
-          month: 7,
-          actualAmount: 35000,
-          actualPlanCodes: ['145'],
-          actualAethosCompetences: ['2026-07'],
-          fiscalCompetenceOffsetMonths: 0,
-        }),
-      ]),
-    );
-    expect(result.actualBasis).toBe('COMPETENCIA_FISCAL_DERIVADA_VALOR_CUSTO');
+    expect(result.entries).toEqual([]);
+    expect(result.actualBasis).toBe('MANUAL_USUARIO');
+    expect(result.actualMappings).toEqual([]);
+    expect(result.summary.actualAmount).toBe(0);
+    expect(groupBy).not.toHaveBeenCalled();
   });
 
-  it('uses January from the following year as December fiscal competence', async () => {
-    const groupBy = jest.fn().mockResolvedValue([
-      {
-        codigoEmpresa: '1',
-        codigoPlanoConta: '153',
-        competencia: '2026-01',
-        _sum: { valorCusto: 111 },
-      },
-      {
-        codigoEmpresa: '1',
-        codigoPlanoConta: '153',
-        competencia: '2027-01',
-        _sum: { valorCusto: 222 },
-      },
-    ]);
+  it('keeps Pedraforte October manual zero when Aethos has a cost', async () => {
+    const groupBy = jest
+      .fn()
+      .mockResolvedValue([
+        {
+          codigoEmpresa: '4',
+          codigoPlanoConta: '1077',
+          competencia: '2026-10',
+          _sum: { valorCusto: 42739.85 },
+        },
+      ]);
     const service = new TaxForecastsService({
-      taxForecast: { findMany: jest.fn().mockResolvedValue([]) },
-      aethosPlanoContaCost: {
-        groupBy,
-        findFirst: jest.fn().mockResolvedValue(null),
+      taxForecast: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'pedra-csll-oct',
+            company: 'PEDRAFORTE',
+            taxType: 'CSLL',
+            year: 2026,
+            month: 10,
+            forecastAmount: new Prisma.Decimal('50000.00'),
+            actualAmount: new Prisma.Decimal('0.00'),
+            updatedById: null,
+            updatedBy: null,
+            createdAt: new Date('2026-10-01T12:00:00.000Z'),
+            updatedAt: new Date('2026-10-01T12:00:00.000Z'),
+          },
+        ]),
       },
+      aethosPlanoContaCost: { groupBy },
     } as any);
 
     const result = await service.findAll(
-      { year: '2026', company: 'JR_CONSTRUCOES', taxType: 'PIS' },
+      { year: '2026', company: 'PEDRAFORTE', taxType: 'CSLL' },
       'contabilidade',
     );
 
     expect(result.entries).toEqual([
       expect.objectContaining({
-        company: 'JR_CONSTRUCOES',
-        taxType: 'PIS',
-        year: 2026,
-        month: 12,
-        actualAmount: 222,
-        actualAethosCompetences: ['2027-01'],
+        company: 'PEDRAFORTE',
+        taxType: 'CSLL',
+        month: 10,
+        forecastAmount: 50000,
+        actualAmount: 0,
+        actualAmountManual: 0,
+        actualAmountAethos: 0,
+        actualSource: 'MANUAL',
       }),
     ]);
-    expect(groupBy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          competencia: {
-            in: expect.arrayContaining(['2026-01', '2027-01']),
-          },
-        }),
-      }),
-    );
+    expect(result.summary.actualAmount).toBe(0);
+    expect(groupBy).not.toHaveBeenCalled();
+  });
+
+  it('returns January and October manual amounts for JR and Pedraforte without Aethos substitution', async () => {
+    const date = new Date('2026-11-01T12:00:00.000Z');
+    const record = (
+      id: string,
+      company: string,
+      month: number,
+      actualAmount: string,
+    ) => ({
+      id,
+      company,
+      taxType: 'PIS',
+      year: 2026,
+      month,
+      forecastAmount: new Prisma.Decimal('500.00'),
+      actualAmount: new Prisma.Decimal(actualAmount),
+      updatedById: 'accounting-user-1',
+      updatedBy: { id: 'accounting-user-1', name: 'Contabilidade' },
+      createdAt: date,
+      updatedAt: date,
+    });
+    const groupBy = jest.fn(() => {
+      throw new Error('Aethos must not be queried');
+    });
+    const service = new TaxForecastsService({
+      taxForecast: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            record('jr-jan', 'JR_CONSTRUCOES', 1, '100.00'),
+            record('pedra-jan', 'PEDRAFORTE', 1, '300.00'),
+            record('jr-oct', 'JR_CONSTRUCOES', 10, '200.00'),
+            record('pedra-oct', 'PEDRAFORTE', 10, '400.00'),
+          ]),
+      },
+      aethosPlanoContaCost: { groupBy },
+    } as any);
+
+    const result = await service.findAll({ year: '2026' }, 'contabilidade');
+
+    expect(
+      result.entries.map(({ company, month, actualAmount, actualSource }) => ({
+        company,
+        month,
+        actualAmount,
+        actualSource,
+      })),
+    ).toEqual([
+      {
+        company: 'JR_CONSTRUCOES',
+        month: 1,
+        actualAmount: 100,
+        actualSource: 'MANUAL',
+      },
+      {
+        company: 'PEDRAFORTE',
+        month: 1,
+        actualAmount: 300,
+        actualSource: 'MANUAL',
+      },
+      {
+        company: 'JR_CONSTRUCOES',
+        month: 10,
+        actualAmount: 200,
+        actualSource: 'MANUAL',
+      },
+      {
+        company: 'PEDRAFORTE',
+        month: 10,
+        actualAmount: 400,
+        actualSource: 'MANUAL',
+      },
+    ]);
+    expect(result.summary.actualAmount).toBe(1000);
+    expect(groupBy).not.toHaveBeenCalled();
   });
 });
