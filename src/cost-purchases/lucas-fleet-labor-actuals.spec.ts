@@ -1,6 +1,10 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { getLucasFleetRosterMonth } from './lucas-fleet-roster.controller';
-import { getLucasFleetGroupLaborActuals } from './lucas-fleet-labor-actuals';
+import {
+  getLucasFleetGroupLaborActuals,
+  isLucasMiniImplement,
+  lucasFleetGroupKey,
+} from './lucas-fleet-labor-actuals';
 import { Prisma } from '@prisma/client';
 import {
   fingerprint0025Aggregate,
@@ -132,6 +136,146 @@ function setup(subgroup = 'CARROS FROTA JR') {
 
 describe('mao de obra da frota com ultimo vinculo mensal', () => {
   beforeEach(() => jest.clearAllMocks());
+
+  it('classifica apenas a capinadeira 127 como implemento das minis a partir de janeiro de 2026', () => {
+    const capinadeira = {
+      fleet: '127',
+      name: 'Capinadeira Hidráulica',
+      subgroup: null,
+    };
+    expect(lucasFleetGroupKey(capinadeira, '2025-12')).toBeNull();
+    expect(isLucasMiniImplement(capinadeira, '2025-12')).toBe(false);
+    expect(lucasFleetGroupKey(capinadeira, '2026-01')).toBe(
+      'SUBGROUP:VASSOURAS',
+    );
+    expect(isLucasMiniImplement(capinadeira, '2026-01')).toBe(true);
+    expect(
+      lucasFleetGroupKey({ ...capinadeira, fleet: '999' }, '2026-01'),
+    ).toBeNull();
+    expect(
+      lucasFleetGroupKey(
+        { fleet: '119', name: 'Fresadora', subgroup: 'FRESADORAS' },
+        '2026-10',
+      ),
+    ).toBe('SUBGROUP:FRESADORAS');
+  });
+
+  it('soma a mao de obra da mini sem exigir vinculos nem duplicar operador dos implementos', async () => {
+    const prisma = setup();
+    const roster = [
+      {
+        id: 'v1',
+        fleet: '128',
+        name: 'Mini carregadeira',
+        subgroup: 'MINI CARREGADEIRAS',
+        active: true,
+      },
+      {
+        id: 'v2',
+        fleet: '127',
+        name: 'Capinadeira Hidraulica',
+        subgroup: null,
+        active: true,
+      },
+      {
+        id: 'v3',
+        fleet: '119',
+        name: 'FREZINHA',
+        subgroup: 'IMPLEMENTOS',
+        active: true,
+      },
+      {
+        id: 'v4',
+        fleet: '185',
+        name: 'Vassoura',
+        subgroup: 'VASSOURAS',
+        active: true,
+      },
+    ];
+    jest
+      .mocked(getLucasFleetRosterMonth)
+      .mockResolvedValue({ rows: roster } as never);
+    prisma.checklist.findMany.mockResolvedValueOnce([current('1-1')]);
+
+    const result = await getLucasFleetGroupLaborActuals(
+      prisma as unknown as PrismaService,
+      '2026-10',
+    );
+
+    expect(result.groupLaborActuals).toHaveLength(1);
+    expect(result.groupLaborActuals[0]).toMatchObject({
+      groupKey: 'SUBGROUP:VASSOURAS',
+      vehicleCount: 4,
+      employeeCount: 1,
+      laborActual: '100.000000',
+      missingLinkVehicleCount: 0,
+      status: 'COMPLETE',
+    });
+    const checklistCalls = prisma.checklist.findMany.mock
+      .calls as unknown as Array<[{ where: { vehicleId: { in: string[] } } }]>;
+    const workforceCalls = prisma.fleetResultMonthlyWorkforce.findMany.mock
+      .calls as unknown as Array<[{ where: { vehicleId: { in: string[] } } }]>;
+    expect(checklistCalls[0][0].where.vehicleId.in).toEqual(['v1']);
+    expect(workforceCalls[0][0].where.vehicleId.in).toEqual(['v1']);
+  });
+
+  it('nao conta a capinadeira como terceira frota no rateio do operador', async () => {
+    const prisma = setup();
+    jest.mocked(getLucasFleetRosterMonth).mockResolvedValue({
+      rows: [
+        {
+          id: 'v1',
+          fleet: '128',
+          name: 'Mini',
+          subgroup: 'MINI CARREGADEIRAS',
+          active: true,
+        },
+        {
+          id: 'v2',
+          fleet: '127',
+          name: 'Capinadeira Hidraulica',
+          subgroup: null,
+          active: true,
+        },
+        {
+          id: 'v3',
+          fleet: '313',
+          name: 'Strada',
+          subgroup: 'CARROS FROTA JR',
+          active: true,
+        },
+      ],
+    } as never);
+    prisma.vehicle.findMany.mockResolvedValueOnce(
+      ['v1', 'v3'].map((id) => ({
+        id,
+        checklistEnabled: true,
+        monthlyChecklistResponsible: { name: 'Silvio' },
+      })),
+    );
+    prisma.checklist.findMany.mockResolvedValueOnce([
+      current('1-1'),
+      { ...current('1-1'), vehicleId: 'v2' },
+      { ...current('1-1'), vehicleId: 'v3' },
+    ]);
+
+    const result = await getLucasFleetGroupLaborActuals(
+      prisma as unknown as PrismaService,
+      '2026-10',
+    );
+    expect(
+      result.groupLaborActuals
+        .map((group) => ({
+          groupKey: group.groupKey,
+          amount: group.laborActual,
+        }))
+        .sort((left, right) => left.groupKey.localeCompare(right.groupKey)),
+    ).toEqual([
+      { groupKey: 'SUBGROUP:CARROS FROTA JR', amount: '50.000000' },
+      { groupKey: 'SUBGROUP:VASSOURAS', amount: '50.000000' },
+    ]);
+    expect(result.coverage.conflictingEmployeeKeys).toBe(0);
+  });
 
   it('usa o ultimo operador quando o mes consultado nao tem checklist', async () => {
     const prisma = setup();
