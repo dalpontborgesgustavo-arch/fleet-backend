@@ -22,6 +22,7 @@ enum RollerType {
 }
 
 model User {
+  asphaltAccess AsphaltProductionAccess?
   id                              String                        @id @default(uuid())
   email                           String                        @unique
   name                            String
@@ -2844,6 +2845,7 @@ model CostPurchaseManagerialQuarantineAudit {
 }
 
 model UsinaProductionFact {
+  asphaltDestination AsphaltDestination?
   id                    String        @id @default(uuid())
   companyId             String
   unitId                String
@@ -2888,6 +2890,7 @@ model UsinaProductionFact {
 }
 
 model UsinaAsphaltTeam {
+  asphaltDays AsphaltProductionDay[]
   id               String                            @id @default(uuid())
   companyId        String
   unitId           String
@@ -4541,6 +4544,7 @@ model DudaShelfRevision {
 
 // Manual production planning is separate from fiscal invoicing and Aethos facts.
 model ProductionControlLine {
+  asphaltDays AsphaltProductionDay[]
   id              String                   @id @default(uuid())
   competence      String                   @db.VarChar(7)
   engineer        String
@@ -4562,6 +4566,49 @@ model ProductionControlLine {
 
   @@unique([competence, sourceSheet, sourceExcelRow])
   @@index([competence, engineer, activity])
+}
+
+model AsphaltProductionDay {
+  workKey String
+  manualWorkName String?
+  manualEngineer String?
+  manualMunicipality String?
+  plantKey String @default("ICARA")
+  plantName String @default("Içara")
+  externalTon Decimal? @db.Decimal(16,3)
+  destinations AsphaltDestination[]
+  id String @id @default(uuid())
+  lineId String?
+  line ProductionControlLine? @relation(fields: [lineId], references: [id], onDelete: Restrict)
+  teamId String
+  team UsinaAsphaltTeam @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  date DateTime @db.Date
+  plannedTon Decimal @db.Decimal(16,3)
+  reason String?
+  details String?
+  productionBy String
+  productionAt DateTime @default(now())
+  laboratory Json?
+  laboratoryBy String?
+  laboratoryAt DateTime?
+  @@unique([workKey, teamId, date, plantKey])
+  @@index([date, teamId])
+}
+
+model AsphaltProductionAccess {
+  userId String @id
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  production Boolean @default(false)
+  laboratory Boolean @default(false)
+}
+
+model AsphaltDestination {
+  factId String @id
+  fact UsinaProductionFact @relation(fields:[factId], references:[id], onDelete:Cascade)
+  dayId String
+  day AsphaltProductionDay @relation(fields:[dayId], references:[id], onDelete:Cascade)
+  updatedBy String
+  updatedAt DateTime @default(now())
 }
 
 model ProductionControlDaily {
