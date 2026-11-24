@@ -17,6 +17,19 @@ import {
 } from './production-control.catalog';
 
 describe('production control guard and calendar', () => {
+  it('stores and audits the monthly target without changing any week', async () => {
+    const tx = {
+      productionControlLine: {update: jest.fn().mockResolvedValue({id:'one'})},
+      productionControlRevision: {create: jest.fn()},
+    };
+    const prisma = {
+      productionControlLine: { findUnique: jest.fn().mockResolvedValue({id:'one', monthlyTarget:null}) },
+      $transaction: (fn: (arg: typeof tx) => Promise<unknown>) => fn(tx),
+    } as unknown as PrismaService;
+    await new ProductionControlService(prisma).updateLine('one',{monthlyTarget:'1000'},'actor');
+    expect(tx.productionControlLine.update.mock.calls[0][0].data.monthlyTarget.toString()).toBe('1000');
+    expect(tx.productionControlRevision.create).toHaveBeenCalledWith({data:expect.objectContaining({after:{monthlyTarget:'1000'}})});
+  });
   it('keeps service units and price suggestions explicit without changing historic prices', () => {
     expect(
       PRODUCTION_SERVICES.find((item) => item.activity === 'Asfalto'),

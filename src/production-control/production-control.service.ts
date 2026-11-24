@@ -314,6 +314,15 @@ export class ProductionControlService {
       before[key] = current[key];
       after[key] = next;
     }
+    if ('monthlyTarget' in body) {
+      const next = parseQuantity(body.monthlyTarget, 'Planejamento mensal', true);
+      const old = current.monthlyTarget?.toString() ?? null;
+      if (next !== old && !(next !== null && old !== null && Number(next) === Number(old))) {
+        data.monthlyTarget = next === null ? null : new Prisma.Decimal(next);
+        before.monthlyTarget = old;
+        after.monthlyTarget = next;
+      }
+    }
     if ('unitPrice' in body) {
       const next = parseUnitPrice(body.unitPrice);
       const old = current.unitPrice?.toString() ?? null;

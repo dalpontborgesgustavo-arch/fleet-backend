@@ -90,6 +90,7 @@ jobs:
       - run: npx prisma db execute --file prisma/migrations/20261026120000_add_duda_shelf/migration.sql --schema prisma/schema.prisma
       - run: npx prisma db execute --file prisma/migrations/20261026150000_add_duda_observation_source_rows/migration.sql --schema prisma/schema.prisma
       - run: npx prisma db execute --file prisma/migrations/20261027150000_add_production_control/migration.sql --schema prisma/schema.prisma
+      - run: npx prisma db execute --file prisma/migrations/20261123190000_production_monthly_target/migration.sql --schema prisma/schema.prisma
       - run: npx prisma db execute --file scripts/asphalt/rehearsal-parent-tables.sql --schema prisma/schema.prisma
       - run: npx prisma db execute --file prisma/migrations/20261123160000_asphalt_production_day/migration.sql --schema prisma/schema.prisma
       # Rehearse the new additive field against the existing Occurrence key shape.

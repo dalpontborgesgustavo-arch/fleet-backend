@@ -4544,6 +4544,7 @@ model DudaShelfRevision {
 
 // Manual production planning is separate from fiscal invoicing and Aethos facts.
 model ProductionControlLine {
+  monthlyTarget   Decimal?                 @db.Decimal(16, 3)
   asphaltDays AsphaltProductionDay[]
   id              String                   @id @default(uuid())
   competence      String                   @db.VarChar(7)
