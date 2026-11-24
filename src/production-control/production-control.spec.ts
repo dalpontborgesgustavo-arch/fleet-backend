@@ -283,6 +283,7 @@ describe('production control guard and calendar', () => {
     } as unknown as PrismaService;
     const service = new ProductionControlService(prisma);
     await service.setWeek('line', '0', { weeklyPlanQuantity: '5' }, 'lucas');
+    await expect(service.setWeek('line', '0', { monthPlanQuantity: '7' }, 'lucas')).rejects.toThrow('Mês inteiro');
     expect(update.mock.calls[0][0].data.weeklyPlanQuantity).toEqual(
       new Prisma.Decimal(5),
     );

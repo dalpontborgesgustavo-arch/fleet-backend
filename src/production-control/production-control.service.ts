@@ -428,36 +428,16 @@ export class ProductionControlService {
     ) {
       throw new BadRequestException('Semana inválida para o mês.');
     }
-    const hasWeeklyPlan = 'weeklyPlanQuantity' in body;
-    const hasMonthPlan = 'monthPlanQuantity' in body;
-    if (!hasWeeklyPlan && !hasMonthPlan)
+    if ('monthPlanQuantity' in body)
+      throw new BadRequestException('Atualize a página e informe o planejamento mensal em Mês inteiro.');
+    if (!('weeklyPlanQuantity' in body))
       throw new BadRequestException('Informe a meta a atualizar.');
-    const weeklyPlanQuantity = hasWeeklyPlan
-      ? parseQuantity(body.weeklyPlanQuantity, 'Previsão semanal', true)
-      : undefined;
-    const monthPlanQuantity = hasMonthPlan
-      ? parseQuantity(body.monthPlanQuantity, 'Meta mensal da semana', true)
-      : undefined;
+    const weeklyPlanQuantity = parseQuantity(body.weeklyPlanQuantity, 'Previsão semanal', true);
     return this.prisma.$transaction(async (tx) => {
       const where = { lineId_weekIndex: { lineId, weekIndex } };
       const prior = await tx.productionControlWeek.findUnique({ where });
       const data = {
-        ...(hasWeeklyPlan
-          ? {
-              weeklyPlanQuantity:
-                weeklyPlanQuantity === null
-                  ? null
-                  : new Prisma.Decimal(weeklyPlanQuantity!),
-            }
-          : {}),
-        ...(hasMonthPlan
-          ? {
-              monthPlanQuantity:
-                monthPlanQuantity === null
-                  ? null
-                  : new Prisma.Decimal(monthPlanQuantity!),
-            }
-          : {}),
+        weeklyPlanQuantity: weeklyPlanQuantity === null ? null : new Prisma.Decimal(weeklyPlanQuantity),
         updatedByUserId: actorId,
       };
       const week = prior
@@ -466,7 +446,6 @@ export class ProductionControlService {
             data: {
               lineId,
               weekIndex,
-              weeklyPlanQuantity: null,
               monthPlanQuantity: null,
               ...data,
             },
