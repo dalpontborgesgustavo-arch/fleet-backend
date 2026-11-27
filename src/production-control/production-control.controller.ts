@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -90,6 +91,22 @@ export class ProductionControlController {
       body,
       assertProductionAccess(req.user),
     );
+  }
+
+  private admin(req: ProductionRequest) {
+    const actor = assertProductionAccess(req.user);
+    if (req.user?.role !== 'admin') throw new ForbiddenException('Somente administradores podem remover a obra do mês.');
+    return actor;
+  }
+
+  @Get('months/:month/works/:line/archive-preview')
+  previewArchive(@Req() req: ProductionRequest, @Param('month') month: string, @Param('line') line: string) {
+    return this.service.archiveMonthWork(line, month, this.admin(req));
+  }
+
+  @Post('months/:month/works/:line/archive')
+  archive(@Req() req: ProductionRequest, @Param('month') month: string, @Param('line') line: string, @Body() body: { signature?: string }) {
+    return this.service.archiveMonthWork(line, month, this.admin(req), body?.signature ?? null);
   }
 
   @Get('lines/:lineId/revisions')

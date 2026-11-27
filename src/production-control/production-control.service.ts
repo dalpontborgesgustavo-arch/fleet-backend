@@ -4,6 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { ConflictException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { activeProduction } from './production-control.visibility';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   monthWeeks,
@@ -44,6 +47,7 @@ export class ProductionControlService {
         where: { id: 'default' },
       }),
       this.prisma.productionControlLine.findMany({
+        where: activeProduction,
         distinct: ['engineer'],
         select: { engineer: true },
       }),
@@ -102,7 +106,7 @@ export class ProductionControlService {
         select: { engineerName: true },
       }),
       this.prisma.productionControlLine.findMany({
-        where: { workCode: code },
+        where: { workCode: code, ...activeProduction },
         select: { workName: true, engineer: true, municipality: true },
       }),
     ]);
@@ -188,14 +192,14 @@ export class ProductionControlService {
   async list(competenceInput: unknown) {
     const competence = parseCompetence(competenceInput);
     const lines = await this.prisma.productionControlLine.findMany({
-      where: { competence },
+      where: { competence, ...activeProduction },
       include: {
         daily: { orderBy: { productionDate: 'asc' } },
         weeks: { orderBy: { weekIndex: 'asc' } },
       },
       orderBy: [{ engineer: 'asc' }, { workName: 'asc' }, { activity: 'asc' }],
     });
-    return { competence, weeks: monthWeeks(competence), lines };
+    return { competence, weeks: monthWeeks(competence), lines, supportsMonthArchive: true };
   }
 
   async create(bodyInput: unknown, actorId: string) {
@@ -215,7 +219,7 @@ export class ProductionControlService {
     const unit = service.unit;
     const unitPrice = parseUnitPrice(body.unitPrice ?? service.suggestedPrice);
     const existing = await this.prisma.productionControlLine.findFirst({
-      where: { competence, workCode: work.code, activity },
+      where: { competence, workCode: work.code, activity, ...activeProduction },
       select: { id: true },
     });
     if (existing)
@@ -261,7 +265,7 @@ export class ProductionControlService {
   async updateLine(lineId: string, bodyInput: unknown, actorId: string) {
     const body = objectBody(bodyInput);
     const current = await this.prisma.productionControlLine.findUnique({
-      where: { id: lineId },
+      where: { id: lineId, ...activeProduction },
     });
     if (!current) throw new NotFoundException('Serviço não encontrado.');
     const data: Prisma.ProductionControlLineUpdateInput = {
@@ -362,7 +366,7 @@ export class ProductionControlService {
   ) {
     const body = objectBody(bodyInput);
     const line = await this.prisma.productionControlLine.findUnique({
-      where: { id: lineId },
+      where: { id: lineId, ...activeProduction },
       select: { competence: true },
     });
     if (!line) throw new NotFoundException('Serviço não encontrado.');
@@ -417,7 +421,7 @@ export class ProductionControlService {
   ) {
     const body = objectBody(bodyInput);
     const line = await this.prisma.productionControlLine.findUnique({
-      where: { id: lineId },
+      where: { id: lineId, ...activeProduction },
       select: { competence: true },
     });
     if (!line) throw new NotFoundException('Serviço não encontrado.');
@@ -476,6 +480,34 @@ export class ProductionControlService {
       }
       return week;
     });
+  }
+
+  async archiveMonthWork(id: string, competenceInput: string, actor: string, confirmation?: unknown) {
+    const competence = parseCompetence(competenceInput);
+    return this.prisma.$transaction(async tx => {
+      const anchor = await tx.productionControlLine.findFirst({
+        where: { id, competence, ...activeProduction },
+      });
+      if (!anchor) throw new NotFoundException('Obra não encontrada neste mês.');
+      const scope = anchor.workCode ? { workCode: anchor.workCode } :
+        { workCode: anchor.workCode, workName: anchor.workName, municipality: anchor.municipality };
+      const lines = await tx.productionControlLine.findMany({
+        where: { competence, ...scope, ...activeProduction }, orderBy: { id: 'asc' },
+        select: { id: true, _count: { select: { daily: true, weeks: true, asphaltDays: true, revisions: true } } },
+      });
+      if (lines.some(l => l._count.asphaltDays)) throw new ConflictException('Há lançamentos de asfalto por equipe vinculados. A obra não foi removida.');
+      const preview = {
+        workName: anchor.workName, competence, services: lines.length,
+        daily: lines.reduce((n,l) => n+l._count.daily,0), weeks: lines.reduce((n,l) => n+l._count.weeks,0),
+        signature: createHash('sha256').update(JSON.stringify([competence,scope,lines])).digest('hex'),
+      };
+      if (confirmation === undefined) return preview;
+      if (confirmation !== preview.signature) throw new ConflictException('Os lançamentos mudaram. Confira novamente antes de remover.');
+      await tx.productionControlRevision.createMany({ data: lines.map(line => ({
+        lineId: line.id, changedByUserId: actor, action: 'ARCHIVE_WORK_MONTH', after: { competence, workName: anchor.workName },
+      })) });
+      return preview;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async revisions(lineId: string) {
