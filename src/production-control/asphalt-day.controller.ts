@@ -8,7 +8,8 @@ import { actualForDay } from './asphalt-day.actual';
 import { monday, teamWeeks } from './asphalt-team-week';
 import { containsDate, dateKey } from '../usina-asphalt-teams/usina-asphalt-teams.rules';
 
-const works = { activity: { equals: 'Asfalto', mode: 'insensitive' as const }, unit: 't' };
+import { activeProduction } from './production-control.visibility';
+const works = { ...activeProduction, activity: { equals: 'Asfalto', mode: 'insensitive' as const }, unit: 't' };
 const lineFields = { id: true, workName: true, workCode: true, engineer: true, municipality: true };
 const labFields = ['cap','teorProjeto','teorRealizado','granulometria','espessuraProjeto','sondagem','espessuraExecutada','compactacao','vazios','observacoes'];
 type Request = {user: ProductionActor};
